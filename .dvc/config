@@ -1,1 +1,4 @@
-
+[core]
+    remote = agriremote
+['remote "agriremote"']
+    url = gdrive://11OtpMpZWsx7sJYW4lUrNcSyKpwareVC1
