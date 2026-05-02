@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "WeatherEvent",
+  "namespace": "com.agriyield.ingestion",
+  "fields": [
+    {"name": "station_id",   "type": "string"},
+    {"name": "field_id",     "type": "string"},
+    {"name": "timestamp",    "type": "long"},
+    {"name": "temperature",  "type": ["null", "float"], "default": null, "doc": "Air temp Celsius"},
+    {"name": "precipitation","type": ["null", "float"], "default": null, "doc": "mm"},
+    {"name": "humidity",     "type": ["null", "float"], "default": null, "doc": "Relative humidity %"},
+    {"name": "wind_speed",   "type": ["null", "float"], "default": null, "doc": "m/s"},
+    {"name": "source",       "type": "string", "doc": "noaa_ghcn or openaq"}
+  ]
+}

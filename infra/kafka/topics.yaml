@@ -1,0 +1,42 @@
+# Topic 1: IoT soil sensor readings
+apiVersion: kafka.strimzi.io/v1          # ← was v1beta2
+kind: KafkaTopic
+metadata:
+  name: soil-sensors
+  namespace: agri-dev
+  labels:
+    strimzi.io/cluster: agri-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "604800000"            # ← quote numeric strings in v1
+    max.message.bytes: "1048576"
+---
+# Topic 2: Satellite NDVI computed values
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: satellite-ndvi
+  namespace: agri-dev
+  labels:
+    strimzi.io/cluster: agri-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "604800000"
+---
+# Topic 3: Weather station events
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: weather-events
+  namespace: agri-dev
+  labels:
+    strimzi.io/cluster: agri-kafka
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "604800000"

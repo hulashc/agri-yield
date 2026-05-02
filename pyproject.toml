@@ -1,0 +1,52 @@
+[project]
+name = "agri-yield"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "confluent-kafka>=2.14.0",
+    "dvc[gdrive,s3]>=3.67.1",
+    "faker>=40.15.0",
+    "fastapi>=0.136.1",
+    "feast>=0.62.0",
+    "great-expectations>=1.17.0",
+    "kafka-python>=2.3.1",
+    "mlflow>=3.11.1",
+    "numpy>=2.4.4",
+    "optuna>=4.8.0",
+    "prefect>=3",
+    "pystac-client>=0.9.0",
+    "rasterio>=1.5.0",
+    "requests>=2.33.1",
+    "shapely>=2.1.2",
+    "tenacity>=8.5.0",
+    "xgboost>=3.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "hatchling>=1.29.0",
+    "mypy>=1.20.2",
+    "pre-commit>=4.6.0",
+    "ruff>=0.15.12",
+    "types-requests>=2.33.0.20260408",
+]
+
+# CHANGED: switch from setuptools to hatchling
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["contracts", "orchestration", "ingestion", "features", "serving", "monitoring", "infra"]
+
+[tool.uv]
+package = true
+
+[tool.mypy]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["requests", "requests.*", "feast.*", "pyspark.*", "kafka.*"]
+ignore_missing_imports = true

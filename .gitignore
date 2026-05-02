@@ -1,0 +1,40 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
+# DVC cache (never commit)
+.dvc/cache/
+.dvc/tmp/
+
+# Raw data (tracked by DVC, not Git)
+data/features/weekly_field_features/
+data/raw/
+
+# Feast
+features/feast_repo/feature_repo/data/online_store.db
+features/feast_repo/feature_repo/data/registry.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.env
+
+# Terraform
+.terraform/
+*.terraform.lock.hcl
+
+# Raw landing data
+data/landing/
+
+# Feast sample data
+features/feast_repo/feature_repo/data/*.parquet

@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "SoilSensorReading",
+  "namespace": "com.agriyield.ingestion",
+  "fields": [
+    {"name": "field_id",     "type": "string"},
+    {"name": "device_id",    "type": "string"},
+    {"name": "timestamp",    "type": "long",   "doc": "Unix timestamp in milliseconds"},
+    {"name": "temperature",  "type": ["null", "float"], "default": null, "doc": "Soil temperature in Celsius"},
+    {"name": "moisture",     "type": ["null", "float"], "default": null, "doc": "Volumetric moisture 0-100%"},
+    {"name": "ph",           "type": ["null", "float"], "default": null, "doc": "pH 0-14"},
+    {"name": "nitrogen",     "type": ["null", "float"], "default": null, "doc": "N mg/kg"},
+    {"name": "phosphorus",   "type": ["null", "float"], "default": null, "doc": "P mg/kg"},
+    {"name": "potassium",    "type": ["null", "float"], "default": null, "doc": "K mg/kg"},
+    {"name": "fault_mode",   "type": {"type": "enum", "name": "FaultMode",
+      "symbols": ["NONE", "DROPOUT", "DRIFT", "BURST"]}, "default": "NONE"}
+  ]
+}

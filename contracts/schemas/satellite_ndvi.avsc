@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "SatelliteNDVI",
+  "namespace": "com.agriyield.ingestion",
+  "fields": [
+    {"name": "field_id",         "type": "string"},
+    {"name": "scene_id",         "type": "string"},
+    {"name": "timestamp",        "type": "long"},
+    {"name": "ndvi",             "type": ["null", "float"], "default": null, "doc": "NDVI in [-1, 1]"},
+    {"name": "cloud_cover_pct",  "type": "float",  "doc": "Scene cloud cover 0-100"},
+    {"name": "ndvi_interpolated","type": "boolean","default": false},
+    {"name": "ndvi_proxied",     "type": "boolean","default": false},
+    {"name": "source",           "type": "string", "doc": "e.g. sentinel-2 or landsat-8"}
+  ]
+}
