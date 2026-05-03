@@ -20,12 +20,13 @@ from serving.schemas import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_model()
-    # Expose /metrics for Prometheus scraping
-    Instrumentator().instrument(app).expose(app)
     yield
 
 
 app = FastAPI(title="agri-yield inference service", lifespan=lifespan)
+
+# instrument() must be called before the app starts — outside lifespan
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")
