@@ -18,13 +18,10 @@ import numpy as np
 
 from training.utils.metrics import compute_metrics, compute_metrics_by_crop
 from training.utils.splits import temporal_train_test_split
+from training.utils.features import get_feature_cols
 
 TARGET = "yield_kg_per_ha"
 NON_FEATURE_COLS = [TARGET, "week_start", "field_id"]
-
-
-def get_feature_cols(df: pd.DataFrame) -> list[str]:
-    return [c for c in df.columns if c not in NON_FEATURE_COLS]
 
 
 def train(

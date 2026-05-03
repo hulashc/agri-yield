@@ -1,0 +1,33 @@
+replicaCount: 2
+
+image:
+  repository: agri-yield-serving
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetPredictionQueueDepth: 100   # custom metric via KEDA or Prometheus adapter
+
+env:
+  REDIS_HOST: redis-master
+  REDIS_PORT: "6379"
+  REGISTERED_MODEL_NAME: agri-yield-xgb
+  MODEL_STAGE: Production
+  CI_WIDTH: "0.15"
+  MAX_MAT_AGE_HOURS: "25"

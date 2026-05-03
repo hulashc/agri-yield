@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agri-yield-serving
+description: Inference service for agri-yield XGBoost model
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
