@@ -38,3 +38,9 @@ data/landing/
 
 # Feast sample data
 features/feast_repo/feature_repo/data/*.parquet
+
+# MLflow runtime artefacts — never commit these
+mlflow.db
+*.db
+mlruns/
+mlartifacts/
