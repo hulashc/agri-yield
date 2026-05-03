@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from serving.feast_client import fetch_online_features
@@ -25,10 +26,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="agri-yield inference service", lifespan=lifespan)
 
-# Both instrument() and expose() at module level.
-# instrument() adds middleware, expose() registers the /metrics route.
-# Both must happen before the app starts accepting requests.
-Instrumentator().instrument(app).expose(app, include_in_schema=False)
+# v7+ dropped built-in expose() — instrument middleware only, expose manually
+Instrumentator().instrument(app)
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
