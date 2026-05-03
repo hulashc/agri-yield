@@ -12,7 +12,9 @@ def materialise_features() -> None:
     logger = get_run_logger()
     logger.info("Starting Feast materialisation")
 
-    from orchestration.materialize import run_materialisation
-    run_materialisation()
-
-    logger.info("Feast materialisation complete")
+    try:
+        from orchestration.materialize import materialize
+        materialize()
+        logger.info("Feast materialisation complete")
+    except Exception as exc:
+        logger.warning(f"Materialisation failed (continuing): {exc}")
