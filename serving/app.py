@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from serving.feast_client import fetch_online_features
 from serving.health import run_health_checks
@@ -19,6 +20,8 @@ from serving.schemas import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_model()
+    # Expose /metrics for Prometheus scraping
+    Instrumentator().instrument(app).expose(app)
     yield
 
 
