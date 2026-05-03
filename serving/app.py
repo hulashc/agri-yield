@@ -16,16 +16,19 @@ from serving.schemas import (
     PredictResponse,
 )
 
-app = FastAPI(title="agri-yield inference service")
 
-# Instrument before app starts — middleware must be added at definition time
-instrumentator = Instrumentator().instrument(app)
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     load_model()
-    instrumentator.expose(app)
+    yield
+
+
+app = FastAPI(title="agri-yield inference service", lifespan=lifespan)
+
+# Both instrument() and expose() at module level.
+# instrument() adds middleware, expose() registers the /metrics route.
+# Both must happen before the app starts accepting requests.
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 @app.get("/health")
