@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    app: {{ .Release.Name }}
+data:
+  REDIS_HOST: {{ .Values.env.REDIS_HOST | quote }}
+  REDIS_PORT: {{ .Values.env.REDIS_PORT | quote }}
+  REGISTERED_MODEL_NAME: {{ .Values.env.REGISTERED_MODEL_NAME | quote }}
+  MODEL_STAGE: {{ .Values.env.MODEL_STAGE | quote }}
+  CI_WIDTH: {{ .Values.env.CI_WIDTH | quote }}
+  MAX_MAT_AGE_HOURS: {{ .Values.env.MAX_MAT_AGE_HOURS | quote }}
