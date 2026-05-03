@@ -1,0 +1,9 @@
+field_id,name,lat,lon,crop_type,region,area_ha,soil_type
+F001,Bicker Fen,52.9135,-0.1736,winter_wheat,Lincolnshire,42.0,peaty_clay
+F002,Holbeach St Marks,52.8389,-0.0325,oilseed_rape,Lincolnshire,38.5,silt_loam
+F003,Spalding East,52.7862,-0.1532,sugar_beet,Lincolnshire,55.0,silt_loam
+F004,Wisbech North,52.6793,0.1631,winter_barley,Cambridgeshire,31.0,sandy_loam
+F005,Boston West,52.9721,-0.0812,winter_wheat,Lincolnshire,47.0,clay_loam
+F006,Kings Lynn South,52.7156,0.3928,oilseed_rape,Norfolk,29.5,sandy_loam
+F007,Downham Market,52.6009,0.3811,sugar_beet,Norfolk,36.0,loamy_sand
+F008,Ely Central,52.3983,0.2617,winter_wheat,Cambridgeshire,44.0,peat
