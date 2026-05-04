@@ -19,7 +19,7 @@ from training.utils.metrics import compute_metrics, compute_metrics_by_crop
 from training.utils.splits import temporal_train_test_split
 
 TARGET = "yield_kg_per_ha"
-REGISTERED_MODEL_NAME = "agri-yield-xgb"  # single source of truth — matches promote.py and serving/model.py
+REGISTERED_MODEL_NAME = "agri-yield-xgb"
 
 
 def train(
@@ -28,9 +28,6 @@ def train(
     dvc_commit: str = "unknown",
     n_cv_folds: int = 5,
 ):
-    """
-    Load features, train XGBoost with cross-validation, log everything to MLflow.
-    """
     if params is None:
         params = {
             "max_depth": 6,
@@ -46,12 +43,10 @@ def train(
     df = pd.read_parquet(dataset_path)
     df = df.dropna(subset=[TARGET])
 
-    # Convert bool flags to int for XGBoost
     for col in ["ndvi_interpolated", "ndvi_proxied"]:
         if col in df.columns:
             df[col] = df[col].astype(int)
 
-    # Encode crop_type before split so both sets share the same encoding
     if df["crop_type"].dtype == object:
         df["crop_type"] = LabelEncoder().fit_transform(df["crop_type"])
 
@@ -63,20 +58,15 @@ def train(
     X_test = test_df[feature_cols]
     y_test = test_df[TARGET]
 
-    # Time-aware cross-validation on training set only
     tscv = TimeSeriesSplit(n_splits=n_cv_folds)
-    cv_rmse_scores = []
-    cv_mae_scores = []
-    cv_r2_scores = []
-
+    cv_rmse_scores, cv_mae_scores, cv_r2_scores = [], [], []
     X_train_arr = X_train.values
     y_train_arr = y_train.values
 
     for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train_arr)):
         fold_model = xgb.XGBRegressor(**params)
         fold_model.fit(
-            X_train_arr[train_idx],
-            y_train_arr[train_idx],
+            X_train_arr[train_idx], y_train_arr[train_idx],
             eval_set=[(X_train_arr[val_idx], y_train_arr[val_idx])],
             verbose=False,
         )
@@ -86,7 +76,6 @@ def train(
         cv_mae_scores.append(fold_metrics["mae"])
         cv_r2_scores.append(fold_metrics["r2"])
 
-    # Final model trained on full training set
     model = xgb.XGBRegressor(**params)
     model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
     test_preds = model.predict(X_test)
@@ -102,48 +91,36 @@ def train(
         mlflow.log_param("n_cv_folds", n_cv_folds)
         mlflow.log_param("feature_count", len(feature_cols))
 
-        # CV metrics per fold
-        for i, (rmse, mae, r2) in enumerate(
-            zip(cv_rmse_scores, cv_mae_scores, cv_r2_scores)
-        ):
+        for i, (rmse, mae, r2) in enumerate(zip(cv_rmse_scores, cv_mae_scores, cv_r2_scores)):
             mlflow.log_metric(f"cv_fold_{i}_rmse", rmse)
             mlflow.log_metric(f"cv_fold_{i}_mae", mae)
             mlflow.log_metric(f"cv_fold_{i}_r2", r2)
 
-        # Aggregated CV metrics
         mlflow.log_metric("cv_rmse_mean", float(np.mean(cv_rmse_scores)))
         mlflow.log_metric("cv_rmse_std", float(np.std(cv_rmse_scores)))
         mlflow.log_metric("cv_mae_mean", float(np.mean(cv_mae_scores)))
         mlflow.log_metric("cv_r2_mean", float(np.mean(cv_r2_scores)))
-
-        # Holdout metrics
         mlflow.log_metric("holdout_rmse", holdout_metrics["rmse"])
         mlflow.log_metric("holdout_mae", holdout_metrics["mae"])
         mlflow.log_metric("holdout_r2", holdout_metrics["r2"])
 
-        # Per-crop metrics
         for crop, metrics in per_crop_metrics.items():
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
-        # Log and register under one consistent name — no duplicate registration
-        mlflow.xgboost.log_model(
-            model,
-            artifact_path="model",
-        )
-
+        mlflow.xgboost.log_model(model, artifact_path="model")
         run_id = run.info.run_id
         model_uri = f"runs:/{run_id}/model"
         result = mlflow.register_model(model_uri=model_uri, name=REGISTERED_MODEL_NAME)
 
-        # Transition to Staging so promote.py can find it
+        # Use alias instead of deprecated stage — MLflow 3.x compatible
         client = MlflowClient()
-        client.transition_model_version_stage(
+        client.set_registered_model_alias(
             name=REGISTERED_MODEL_NAME,
+            alias="challenger",
             version=result.version,
-            stage="Staging",
         )
-        print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → Staging")
+        print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → alias=challenger")
         print(f"Run ID: {run_id}")
         print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")
         return run_id, holdout_metrics
@@ -154,6 +131,5 @@ if __name__ == "__main__":
     parser.add_argument("--dataset-path", default="data/features/weekly_field_features")
     parser.add_argument("--dvc-commit", default="unknown")
     args = parser.parse_args()
-
     mlflow.set_experiment("agri-yield-training")
     train(dataset_path=args.dataset_path, dvc_commit=args.dvc_commit)
