@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
+import mlflow
 import mlflow.xgboost
 import numpy as np
 import pandas as pd
@@ -11,8 +12,8 @@ from training.utils.features import FEATURE_COLS
 
 log = logging.getLogger(__name__)
 
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "agri-yield-xgb")
-# Use alias 'champion' — MLflow 3.x compatible (stages deprecated)
 MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
 CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))
 
@@ -23,18 +24,29 @@ _model_version: str = "not_loaded"
 def load_model() -> bool:
     global _model, _model_version
     try:
-        client = mlflow.tracking.MlflowClient()
+        # Always set tracking URI explicitly so artifact proxy is used
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        os.environ["MLFLOW_TRACKING_URI"] = MLFLOW_TRACKING_URI
+
+        client = mlflow.tracking.MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
         version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, MODEL_ALIAS)
         _model_version = version.version
+
+        # Use the tracking URI as artifact proxy — downloads via HTTP, no filesystem needed
         model_uri = f"models:/{REGISTERED_MODEL_NAME}@{MODEL_ALIAS}"
-        _model = mlflow.xgboost.load_model(model_uri)
-        log.info("Loaded model '%s' @%s (version %s)", REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version)
+        _model = mlflow.xgboost.load_model(
+            model_uri,
+            dst_path="/tmp/mlflow_model_cache",
+        )
+        log.info(
+            "Loaded model '%s' @%s (version %s) via %s",
+            REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version, MLFLOW_TRACKING_URI,
+        )
         return True
     except Exception as exc:
         log.warning(
-            "No '%s' model with alias '%s' found. "
-            "Run training/train.py then training/promote.py to register one. "
-            "API will start but /predict returns 503 until a model is available. (%s)",
+            "Could not load model '%s' @%s: %s — "
+            "API will start but /predict returns 503 until a model is available.",
             REGISTERED_MODEL_NAME, MODEL_ALIAS, exc,
         )
         return False

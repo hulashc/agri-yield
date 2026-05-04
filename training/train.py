@@ -4,6 +4,7 @@ and registers the model to MLflow. Callable by Prefect.
 """
 
 import argparse
+import os
 
 import mlflow
 import mlflow.xgboost
@@ -17,6 +18,8 @@ from sklearn.preprocessing import LabelEncoder
 from training.utils.features import get_feature_cols
 from training.utils.metrics import compute_metrics, compute_metrics_by_crop
 from training.utils.splits import temporal_train_test_split
+
+os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
 
 TARGET = "yield_kg_per_ha"
 REGISTERED_MODEL_NAME = "agri-yield-xgb"
@@ -108,12 +111,12 @@ def train(
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
-        mlflow.xgboost.log_model(model, artifact_path="model")
+        # Use name= instead of deprecated artifact_path=
+        mlflow.xgboost.log_model(model, name="model")
         run_id = run.info.run_id
         model_uri = f"runs:/{run_id}/model"
         result = mlflow.register_model(model_uri=model_uri, name=REGISTERED_MODEL_NAME)
 
-        # Use alias instead of deprecated stage — MLflow 3.x compatible
         client = MlflowClient()
         client.set_registered_model_alias(
             name=REGISTERED_MODEL_NAME,
