@@ -3,25 +3,23 @@ XGBoost training script. Accepts a DVC dataset path, trains, evaluates,
 and registers the model to MLflow. Callable by Prefect.
 """
 
-# training/train.py — top of file, before anything else
 import argparse
 
 import mlflow
 import mlflow.xgboost
+import numpy as np
+import pandas as pd
 import xgboost as xgb
 from mlflow.tracking import MlflowClient
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import LabelEncoder
 
-import pandas as pd
-import numpy as np
-
+from training.utils.features import get_feature_cols
 from training.utils.metrics import compute_metrics, compute_metrics_by_crop
 from training.utils.splits import temporal_train_test_split
-from training.utils.features import get_feature_cols
 
 TARGET = "yield_kg_per_ha"
-NON_FEATURE_COLS = [TARGET, "week_start", "field_id"]
+REGISTERED_MODEL_NAME = "agri-yield-xgb"  # single source of truth — matches promote.py and serving/model.py
 
 
 def train(
@@ -53,6 +51,10 @@ def train(
         if col in df.columns:
             df[col] = df[col].astype(int)
 
+    # Encode crop_type before split so both sets share the same encoding
+    if df["crop_type"].dtype == object:
+        df["crop_type"] = LabelEncoder().fit_transform(df["crop_type"])
+
     train_df, test_df = temporal_train_test_split(df)
     feature_cols = get_feature_cols(df)
 
@@ -61,18 +63,11 @@ def train(
     X_test = test_df[feature_cols]
     y_test = test_df[TARGET]
 
-    model = xgb.XGBRegressor(**params)
-
     # Time-aware cross-validation on training set only
     tscv = TimeSeriesSplit(n_splits=n_cv_folds)
     cv_rmse_scores = []
     cv_mae_scores = []
     cv_r2_scores = []
-
-    # In your train() function, before building X_train_arr
-
-    if df["crop_type"].dtype == object:
-        df["crop_type"] = LabelEncoder().fit_transform(df["crop_type"])
 
     X_train_arr = X_train.values
     y_train_arr = y_train.values
@@ -92,6 +87,7 @@ def train(
         cv_r2_scores.append(fold_metrics["r2"])
 
     # Final model trained on full training set
+    model = xgb.XGBRegressor(**params)
     model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
     test_preds = model.predict(X_test)
     holdout_metrics = compute_metrics(y_test.values, test_preds)
@@ -130,19 +126,14 @@ def train(
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
+        # Log and register under one consistent name — no duplicate registration
         mlflow.xgboost.log_model(
             model,
             artifact_path="model",
-            registered_model_name="agri-yield-xgboost",
         )
 
-        REGISTERED_MODEL_NAME = "agri-yield-xgb"  # must match promote.py exactly
-
-        # Inside your mlflow.start_run() block, after mlflow.log_model(...)
-        run_id = mlflow.active_run().info.run_id
+        run_id = run.info.run_id
         model_uri = f"runs:/{run_id}/model"
-
-        # Register the model
         result = mlflow.register_model(model_uri=model_uri, name=REGISTERED_MODEL_NAME)
 
         # Transition to Staging so promote.py can find it
@@ -152,11 +143,10 @@ def train(
             version=result.version,
             stage="Staging",
         )
-        print(f"Model v{result.version} registered and moved to Staging")
-
-        print(f"Run ID: {run.info.run_id}")
+        print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → Staging")
+        print(f"Run ID: {run_id}")
         print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")
-        return run.info.run_id, holdout_metrics
+        return run_id, holdout_metrics
 
 
 if __name__ == "__main__":

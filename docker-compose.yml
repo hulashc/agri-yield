@@ -1,0 +1,109 @@
+version: '3.9'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REDIS_URL: redis://redis:6379
+      FEAST_REPO_PATH: /app/features/feast_repo
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./data:/app/data
+      - ./features:/app/features
+    depends_on:
+      - redis
+      - mlflow
+      - kafka
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      CLUSTER_ID: MkU3OEdKNTcwNTJENDM2Qg==
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.11.1
+    ports:
+      - "5000:5000"
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000
+    volumes:
+      - ./data:/app/data
+      - ./features:/app/features
+      - mlflow_data:/mlflow
+    environment:
+      MLFLOW_FLASK_SERVER_SECRET_KEY: supersecret  # pragma: allowlist secret
+      GUNICORN_CMD_ARGS: --forwarded-allow-ips=*
+      MLFLOW_ALLOWED_HOSTS: '*'
+      MLFLOW_HOST_WHITELIST: '*'
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: agri-yield-admin  # pragma: allowlist secret
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/agri_yield_dashboard.json
+    volumes:
+      - ./monitoring/grafana:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  prefect:
+    image: prefecthq/prefect:2-python3.11
+    ports:
+      - "4200:4200"
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: "sqlite+aiosqlite:////prefect/prefect.db"
+    volumes:
+      - prefect_data:/prefect
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  mlflow_data:
+  grafana_data:
+  prefect_data:
+  kafka_data:

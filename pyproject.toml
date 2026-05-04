@@ -1,7 +1,7 @@
 [project]
 name = "agri-yield"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agricultural yield prediction MLOps platform"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -24,6 +24,7 @@ dependencies = [
     "rasterio>=1.5.0",
     "redis>=5.2.1",
     "requests>=2.33.1",
+    "scikit-learn>=1.6.0",
     "shapely>=2.1.2",
     "tenacity>=8.5.0",
     "xgboost>=3.2.0",
@@ -34,17 +35,27 @@ dev = [
     "hatchling>=1.29.0",
     "mypy>=1.20.2",
     "pre-commit>=4.6.0",
+    "pytest>=8.0.0",
     "ruff>=0.15.12",
     "types-requests>=2.33.0.20260408",
 ]
 
-# CHANGED: switch from setuptools to hatchling
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["contracts", "orchestration", "ingestion", "features", "serving", "monitoring", "infra"]
+# All importable packages — training was previously missing and caused ModuleNotFoundError
+packages = [
+    "contracts",
+    "orchestration",
+    "ingestion",
+    "features",
+    "serving",
+    "monitoring",
+    "infra",
+    "training",
+]
 
 [tool.uv]
 package = true
@@ -55,3 +66,14 @@ explicit_package_bases = true
 [[tool.mypy.overrides]]
 module = ["requests", "requests.*", "feast.*", "pyspark.*", "kafka.*"]
 ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

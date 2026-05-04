@@ -6,6 +6,9 @@ import mlflow.xgboost
 import numpy as np
 import pandas as pd
 
+# Import the single source-of-truth feature list from training
+from training.utils.features import FEATURE_COLS
+
 REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "agri-yield-xgb")
 MODEL_STAGE = os.getenv("MODEL_STAGE", "Production")
 CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))  # ±15% confidence interval
@@ -16,6 +19,7 @@ _model_version: str = "unknown"
 
 def load_model() -> None:
     global _model, _model_version
+
     client = mlflow.tracking.MlflowClient()
     versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
     prod = [v for v in versions if v.current_stage == MODEL_STAGE]
@@ -23,7 +27,9 @@ def load_model() -> None:
         raise RuntimeError(f"No {MODEL_STAGE} model found for {REGISTERED_MODEL_NAME}")
     latest = sorted(prod, key=lambda v: int(v.version))[-1]
     _model_version = latest.version
-    _model = mlflow.xgboost.load_model(f"models:/{REGISTERED_MODEL_NAME}/{MODEL_STAGE}")
+
+    model_uri = f"models:/{REGISTERED_MODEL_NAME}/{MODEL_STAGE}"
+    _model = mlflow.xgboost.load_model(model_uri)
 
 
 def get_model():
@@ -31,27 +37,6 @@ def get_model():
         raise RuntimeError("Model not loaded. Call load_model() at startup.")
     return _model
 
-
-# Exact column order the model was trained on — must match train.py
-FEATURE_COLS = [
-    "crop_type",
-    "soil_temp_mean",
-    "soil_temp_std",
-    "moisture_mean",
-    "moisture_std",
-    "ph_mean",
-    "nitrogen_mean",
-    "phosphorus_mean",
-    "potassium_mean",
-    "air_temp_mean",
-    "precip_total",
-    "humidity_mean",
-    "wind_speed_mean",
-    "latest_ndvi",
-    "cloud_cover_pct",
-    "ndvi_interpolated",
-    "ndvi_proxied",
-]
 
 NON_FEATURE_COLS = ["field_id", "event_timestamp"]
 
