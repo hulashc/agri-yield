@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from ingestion.openmeteo_live import get_live_features
 from monitoring.prometheus_metrics import (
@@ -39,11 +40,27 @@ async def lifespan(app: FastAPI):
         log.warning("data/seed/uk_fields.csv not found — /predict will return 503 until data is seeded.")
         _FIELDS_DF = pd.DataFrame()
 
-    load_model()  # non-fatal — logs warning if no Production model exists yet
+    load_model()
     yield
 
 
 app = FastAPI(title="Agri Yield API", version="0.1.0", lifespan=lifespan)
+
+# CORS — allow requests from local dev, GitHub Pages, and any Vercel deployment
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3001",
+        "https://hulashc.github.io",
+        "https://*.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(metrics_router)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
