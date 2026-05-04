@@ -1,0 +1,84 @@
+# contracts/feature_schema.yaml
+# Feature validation contract — checked before Feast materialisation
+# and at serving time. Fail fast on violations.
+
+version: "1.0"
+updated: "2026-05-03"
+
+features:
+  rainfall_today_mm:
+    type: float
+    min: 0.0
+    max: 150.0
+    nullable: false
+    description: "Open-Meteo daily precipitation sum"
+
+  rainfall_30d_mm:
+    type: float
+    min: 0.0
+    max: 500.0
+    nullable: false
+    description: "NASA POWER 30-day rolling rainfall"
+
+  solar_radiation_today:
+    type: float
+    min: 0.0
+    max: 40.0
+    nullable: true
+    description: "Shortwave radiation MJ/m²/day"
+
+  t2m_max_today:
+    type: float
+    min: -20.0
+    max: 50.0
+    nullable: false
+
+  t2m_min_today:
+    type: float
+    min: -25.0
+    max: 40.0
+    nullable: false
+
+  rh2m_today:
+    type: float
+    min: 0.0
+    max: 100.0
+    nullable: true
+
+  windspeed_today:
+    type: float
+    min: 0.0
+    max: 60.0
+    nullable: true
+
+  et0_today:
+    type: float
+    min: 0.0
+    max: 20.0
+    nullable: true
+    description: "FAO-56 reference evapotranspiration mm/day"
+
+  gdd_accumulation:
+    type: float
+    min: 0.0
+    max: 3000.0
+    nullable: false
+    description: "Growing degree days from sowing date"
+
+  ndvi_latest:
+    type: float
+    min: -1.0
+    max: 1.0
+    nullable: true
+    description: "Latest NDVI from Sentinel-2 or MODIS"
+
+  ndvi_14d_delta:
+    type: float
+    min: -1.0
+    max: 1.0
+    nullable: true
+
+thresholds:
+  null_rate_max: 0.05      # Fail if >5% nulls in non-nullable fields
+  drift_psi_amber: 0.10    # Log warning
+  drift_psi_red: 0.20      # Trigger retraining

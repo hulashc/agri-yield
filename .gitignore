@@ -44,3 +44,10 @@ mlflow.db
 *.db
 mlruns/
 mlartifacts/
+
+data/monitoring/
+
+data/monitoring/
+data/monitoring/**
+
+data/monitoring/

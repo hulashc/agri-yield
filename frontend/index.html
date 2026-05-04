@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UK Field Yield Forecast</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+        }
+
+        #header {
+            padding: 16px 24px;
+            background: #1a1d27;
+            border-bottom: 1px solid #2a2d3a;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        #header h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        #header span {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+
+        #map {
+            height: calc(100vh - 57px);
+            width: 100%;
+        }
+
+        .leaflet-popup-content-wrapper {
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 10px;
+            color: #e0e0e0;
+        }
+
+        .leaflet-popup-tip {
+            background: #1a1d27;
+        }
+
+        .popup-field-name {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .popup-yield {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #22c55e;
+        }
+
+        .popup-unit {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+
+        .popup-ci {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+
+        .popup-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 99px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-green {
+            background: #14532d;
+            color: #4ade80;
+        }
+
+        .badge-amber {
+            background: #451a03;
+            color: #fb923c;
+        }
+
+        .badge-red {
+            background: #450a0a;
+            color: #f87171;
+        }
+
+        .popup-meta {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 8px;
+        }
+
+        .loading-ring {
+            border: 3px solid #2a2d3a;
+            border-top-color: #22c55e;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="header">
+        <h1>🌾 UK Field Yield Forecast</h1>
+        <span>Click a field to get this season's yield prediction</span>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const API_BASE = "%%API_URL%%"; // replaced at deploy time by Vercel env var
+
+        const FIELDS = [{
+                id: "F001",
+                name: "Bicker Fen",
+                lat: 52.9135,
+                lon: -0.1736,
+                crop: "Winter Wheat",
+                region: "Lincolnshire"
+            },
+            {
+                id: "F002",
+                name: "Holbeach St Marks",
+                lat: 52.8389,
+                lon: -0.0325,
+                crop: "Oilseed Rape",
+                region: "Lincolnshire"
+            },
+            {
+                id: "F003",
+                name: "Spalding East",
+                lat: 52.7862,
+                lon: -0.1532,
+                crop: "Sugar Beet",
+                region: "Lincolnshire"
+            },
+            {
+                id: "F004",
+                name: "Wisbech North",
+                lat: 52.6793,
+                lon: 0.1631,
+                crop: "Winter Barley",
+                region: "Cambridgeshire"
+            },
+            {
+                id: "F005",
+                name: "Boston West",
+                lat: 52.9721,
+                lon: -0.0812,
+                crop: "Winter Wheat",
+                region: "Lincolnshire"
+            },
+            {
+                id: "F006",
+                name: "Kings Lynn South",
+                lat: 52.7156,
+                lon: 0.3928,
+                crop: "Oilseed Rape",
+                region: "Norfolk"
+            },
+            {
+                id: "F007",
+                name: "Downham Market",
+                lat: 52.6009,
+                lon: 0.3811,
+                crop: "Sugar Beet",
+                region: "Norfolk"
+            },
+            {
+                id: "F008",
+                name: "Ely Central",
+                lat: 52.3983,
+                lon: 0.2617,
+                crop: "Winter Wheat",
+                region: "Cambridgeshire"
+            },
+        ];
+
+        const map = L.map("map").setView([52.75, 0.10], 9);
+
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            attribution: "© OpenStreetMap © CARTO",
+            maxZoom: 18,
+        }).addTo(map);
+
+        function makeIcon(color) {
+            const c = color === "red" ? "#ef4444" : color === "amber" ? "#f97316" : "#22c55e";
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2"/>
+        <circle cx="12" cy="12" r="4" fill="${c}"/>
+      </svg>`;
+            return L.divIcon({
+                html: svg,
+                className: "",
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+        }
+
+        async function fetchPrediction(fieldId) {
+            const today = new Date().toISOString().split("T")[0];
+            const resp = await fetch(`${API_BASE}/predict`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    field_id: fieldId,
+                    prediction_date: today
+                }),
+            });
+            if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+            return resp.json();
+        }
+
+        FIELDS.forEach(field => {
+            const marker = L.marker([field.lat, field.lon], {
+                icon: makeIcon("green")
+            }).addTo(map);
+
+            marker.on("click", async () => {
+                marker.bindPopup(`
+          <div class="popup-field-name">${field.name}</div>
+          <div style="text-align:center;padding:12px 0"><div class="loading-ring"></div></div>
+          <div class="popup-meta">${field.crop} · ${field.region}</div>
+        `).openPopup();
+
+                try {
+                    const data = await fetchPrediction(field.id);
+                    const badgeClass = data.drift_level === "red" ? "badge-red" : data
+                        .drift_level === "amber" ? "badge-amber" : "badge-green";
+                    const badgeText = data.drift_level === "red" ? "⚠ High Drift" : data
+                        .drift_level === "amber" ? "⚡ Moderate Drift" : "✓ Stable";
+
+                    marker.setIcon(makeIcon(data.drift_level));
+                    marker.getPopup().setContent(`
+            <div class="popup-field-name">${field.name}</div>
+            <div class="popup-yield">${Math.round(data.predicted_yield_kg_ha).toLocaleString()}</div>
+            <div class="popup-unit">kg / hectare</div>
+            <div class="popup-ci">80% CI: ${Math.round(data.lower_bound).toLocaleString()} – ${Math.round(data.upper_bound).toLocaleString()} kg/ha</div>
+            <span class="popup-badge ${badgeClass}">${badgeText}</span>
+            <div class="popup-meta">${field.crop} · ${field.region}</div>
+            <div class="popup-meta">Model v${data.model_version} · ${new Date(data.last_updated).toLocaleString("en-GB")}</div>
+            ${data.stale_features ? '<div class="popup-meta" style="color:#f87171">⚠ Stale features</div>' : ''}
+          `);
+                } catch (err) {
+                    marker.getPopup().setContent(`
+            <div class="popup-field-name">${field.name}</div>
+            <div style="color:#f87171;font-size:0.85rem">Failed to load prediction.<br>${err.message}</div>
+          `);
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
