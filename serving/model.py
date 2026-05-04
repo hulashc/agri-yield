@@ -16,6 +16,7 @@ _model_version: str = "unknown"
 
 def load_model() -> None:
     global _model, _model_version
+
     client = mlflow.tracking.MlflowClient()
     versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
     prod = [v for v in versions if v.current_stage == MODEL_STAGE]
@@ -23,7 +24,9 @@ def load_model() -> None:
         raise RuntimeError(f"No {MODEL_STAGE} model found for {REGISTERED_MODEL_NAME}")
     latest = sorted(prod, key=lambda v: int(v.version))[-1]
     _model_version = latest.version
-    _model = mlflow.xgboost.load_model(f"models:/{REGISTERED_MODEL_NAME}/{MODEL_STAGE}")
+
+    model_uri = f"models:/{REGISTERED_MODEL_NAME}/{MODEL_STAGE}"
+    _model = mlflow.xgboost.load_model(model_uri)
 
 
 def get_model():

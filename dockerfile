@@ -11,9 +11,12 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 COPY serving/ ./serving/
 COPY features/feast_repo/ ./features/feast_repo/
+COPY ingestion/ ./ingestion/
+COPY monitoring/ ./monitoring/
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:"
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 EXPOSE 8000
 

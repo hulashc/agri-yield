@@ -69,7 +69,7 @@ def run_baseline():
                 mlflow.log_metric(f"{crop}_{metric_name}", value)
 
         mlflow.sklearn.log_model(
-            model, artifact_path="model", registered_model_name="agri-yield-baseline"
+            model, name="model", registered_model_name="agri-yield-baseline"
         )
         print(
             f"Baseline logged: RMSE={metrics['rmse']:.4f} MAE={metrics['mae']:.4f} R²={metrics['r2']:.4f}"
