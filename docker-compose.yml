@@ -62,10 +62,10 @@ services:
       - ./features:/app/features
       - mlflow_data:/mlflow
     environment:
-      MLFLOW_FLASK_SERVER_SECRET_KEY: supersecret  # pragma: allowlist secret
-      GUNICORN_CMD_ARGS: --forwarded-allow-ips=*
-      MLFLOW_ALLOWED_HOSTS: '*'
-      MLFLOW_HOST_WHITELIST: '*'
+      MLFLOW_FLASK_SERVER_SECRET_KEY: "supersecret"  # pragma: allowlist secret
+      GUNICORN_CMD_ARGS: "--forwarded-allow-ips=*"
+      MLFLOW_ALLOWED_HOSTS: "*"
+      MLFLOW_HOST_WHITELIST: "*"
     restart: unless-stopped
 
   prometheus:
@@ -81,7 +81,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: agri-yield-admin  # pragma: allowlist secret
+      GF_SECURITY_ADMIN_PASSWORD: "agri-yield-admin"  # pragma: allowlist secret
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/agri_yield_dashboard.json
     volumes:
       - ./monitoring/grafana:/etc/grafana/provisioning/dashboards:ro
