@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 import mlflow
 import mlflow.xgboost
@@ -16,6 +17,7 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "agri-yield-xgb")
 MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
 CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))
+MODEL_CACHE_PATH = "/tmp/mlflow_model_cache"
 
 _model = None
 _model_version: str = "not_loaded"
@@ -24,7 +26,9 @@ _model_version: str = "not_loaded"
 def load_model() -> bool:
     global _model, _model_version
     try:
-        # Always set tracking URI explicitly so artifact proxy is used
+        # Ensure cache dir exists
+        Path(MODEL_CACHE_PATH).mkdir(parents=True, exist_ok=True)
+
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         os.environ["MLFLOW_TRACKING_URI"] = MLFLOW_TRACKING_URI
 
@@ -32,15 +36,11 @@ def load_model() -> bool:
         version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, MODEL_ALIAS)
         _model_version = version.version
 
-        # Use the tracking URI as artifact proxy — downloads via HTTP, no filesystem needed
         model_uri = f"models:/{REGISTERED_MODEL_NAME}@{MODEL_ALIAS}"
-        _model = mlflow.xgboost.load_model(
-            model_uri,
-            dst_path="/tmp/mlflow_model_cache",
-        )
+        _model = mlflow.xgboost.load_model(model_uri, dst_path=MODEL_CACHE_PATH)
         log.info(
-            "Loaded model '%s' @%s (version %s) via %s",
-            REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version, MLFLOW_TRACKING_URI,
+            "Loaded model '%s' @%s (version %s)",
+            REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version,
         )
         return True
     except Exception as exc:
