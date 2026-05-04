@@ -13,6 +13,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./features:/app/features
+      - mlflow_data:/mlflow  # shared with mlflow container so artifact paths resolve
     depends_on:
       - redis
       - mlflow
