@@ -136,7 +136,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const API_BASE = "%%API_URL%%"; // replaced at deploy time by Vercel env var
+        const API_BASE = "http://localhost:8000"; // replaced at deploy time by Vercel env var
 
         const FIELDS = [{
                 id: "F001",
@@ -234,7 +234,7 @@
                 },
                 body: JSON.stringify({
                     field_id: fieldId,
-                    prediction_date: today
+                    event_timestamp: today + "T00:00:00"
                 }),
             });
             if (!resp.ok) throw new Error(`API error: ${resp.status}`);

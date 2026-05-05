@@ -9,7 +9,12 @@ FROM python:3.13-slim AS runtime
 WORKDIR /app
 
 COPY --from=builder /app/.venv ./.venv
+
+# Copy all application modules needed at runtime
 COPY serving/ ./serving/
+COPY ingestion/ ./ingestion/
+COPY monitoring/ ./monitoring/
+COPY training/ ./training/
 COPY features/feast_repo/ ./features/feast_repo/
 COPY ingestion/ ./ingestion/
 COPY monitoring/ ./monitoring/

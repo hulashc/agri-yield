@@ -69,7 +69,8 @@ def train(
     for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train_arr)):
         fold_model = xgb.XGBRegressor(**params)
         fold_model.fit(
-            X_train_arr[train_idx], y_train_arr[train_idx],
+            X_train_arr[train_idx],
+            y_train_arr[train_idx],
             eval_set=[(X_train_arr[val_idx], y_train_arr[val_idx])],
             verbose=False,
         )
@@ -124,7 +125,9 @@ def train(
             alias="challenger",
             version=result.version,
         )
-        print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' \u2192 alias=challenger")
+        print(
+            f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' \u2192 alias=challenger"
+        )
         print(f"Run ID: {run_id}")
         print(f"Model URI: {model_uri}")
         print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")

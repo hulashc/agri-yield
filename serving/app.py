@@ -3,11 +3,14 @@ serving/app.py
 FastAPI prediction endpoint for agri-yield.
 """
 
+import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from ingestion.openmeteo_live import get_live_features
 from monitoring.prometheus_metrics import (
@@ -23,29 +26,70 @@ import serving.model as model_module
 from serving.model import load_model
 from serving.schemas import PredictRequest
 
-app = FastAPI(title="Agri Yield API", version="0.1.0")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load model and field metadata at startup. Failures are non-fatal."""
+    global _FIELDS_DF
+    try:
+        _FIELDS_DF = pd.read_csv("data/seed/uk_fields.csv").set_index("field_id")
+        log.info("Loaded %d fields from uk_fields.csv", len(_FIELDS_DF))
+    except FileNotFoundError:
+        log.warning("data/seed/uk_fields.csv not found — /predict will return 503 until data is seeded.")
+        _FIELDS_DF = pd.DataFrame()
+
+    load_model()
+    yield
+
+
+app = FastAPI(title="Agri Yield API", version="0.1.0", lifespan=lifespan)
+
+# CORS — allow requests from local dev, GitHub Pages, and any Vercel deployment
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3001",
+        "https://hulashc.github.io",
+        "https://*.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(metrics_router)
 
-# Load field metadata once at startup
-_FIELDS_DF = pd.read_csv("data/seed/uk_fields.csv").set_index("field_id")
+_FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
 
 def get_field_meta(field_id: str) -> dict:  # type: ignore[type-arg]
-    if field_id not in _FIELDS_DF.index:
+    if _FIELDS_DF.empty or field_id not in _FIELDS_DF.index:
         raise HTTPException(status_code=404, detail=f"Unknown field_id: {field_id}")
     return _FIELDS_DF.loc[field_id].to_dict()
 
 
-load_model()
-
-
 @app.get("/health")
 def health() -> dict:  # type: ignore[type-arg]
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "model_loaded": model_module.is_loaded(),
+        "model_version": model_module.model_version(),
+        "fields_loaded": not _FIELDS_DF.empty,
+    }
 
 
 @app.post("/predict")
 async def predict(request: PredictRequest) -> dict:  # type: ignore[type-arg]
+    if not model_module.is_loaded():
+        raise HTTPException(
+            status_code=503,
+            detail="No Production model available. Run training/train.py then training/promote.py first.",
+        )
+
     start = time.time()
 
     field_meta = get_field_meta(request.field_id)

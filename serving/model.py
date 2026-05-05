@@ -44,15 +44,20 @@ def load_model() -> bool:
         _model_feature_cols = booster.feature_names or FEATURE_COLS
         log.info(
             "Loaded model '%s' @%s (version %s) — %d features: %s",
-            REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version,
-            len(_model_feature_cols), _model_feature_cols,
+            REGISTERED_MODEL_NAME,
+            MODEL_ALIAS,
+            _model_version,
+            len(_model_feature_cols),
+            _model_feature_cols,
         )
         return True
     except Exception as exc:
         log.warning(
             "Could not load model '%s' @%s: %s — "
             "API will start but /predict returns 503 until a model is available.",
-            REGISTERED_MODEL_NAME, MODEL_ALIAS, exc,
+            REGISTERED_MODEL_NAME,
+            MODEL_ALIAS,
+            exc,
         )
         return False
 
