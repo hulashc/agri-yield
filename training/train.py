@@ -111,9 +111,11 @@ def train(
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
-        mlflow.xgboost.log_model(model, artifact_path="model")
+        # MLflow v3: log_model returns a LoggedModel with model_uri
+        logged = mlflow.xgboost.log_model(model, name="model")
+        model_uri = logged.model_uri
         run_id = run.info.run_id
-        model_uri = f"runs:/{run_id}/model"
+
         result = mlflow.register_model(model_uri=model_uri, name=REGISTERED_MODEL_NAME)
 
         client = MlflowClient()
@@ -124,6 +126,7 @@ def train(
         )
         print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' \u2192 alias=challenger")
         print(f"Run ID: {run_id}")
+        print(f"Model URI: {model_uri}")
         print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")
         return run_id, holdout_metrics
 
