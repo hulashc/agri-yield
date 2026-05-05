@@ -136,146 +136,123 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const API_BASE = "http://localhost:8000"; // replaced at deploy time by Vercel env var
+        const API_BASE = "http://localhost:8000";
 
-        const FIELDS = [{
-                id: "F001",
-                name: "Bicker Fen",
-                lat: 52.9135,
-                lon: -0.1736,
-                crop: "Winter Wheat",
-                region: "Lincolnshire"
-            },
-            {
-                id: "F002",
-                name: "Holbeach St Marks",
-                lat: 52.8389,
-                lon: -0.0325,
-                crop: "Oilseed Rape",
-                region: "Lincolnshire"
-            },
-            {
-                id: "F003",
-                name: "Spalding East",
-                lat: 52.7862,
-                lon: -0.1532,
-                crop: "Sugar Beet",
-                region: "Lincolnshire"
-            },
-            {
-                id: "F004",
-                name: "Wisbech North",
-                lat: 52.6793,
-                lon: 0.1631,
-                crop: "Winter Barley",
-                region: "Cambridgeshire"
-            },
-            {
-                id: "F005",
-                name: "Boston West",
-                lat: 52.9721,
-                lon: -0.0812,
-                crop: "Winter Wheat",
-                region: "Lincolnshire"
-            },
-            {
-                id: "F006",
-                name: "Kings Lynn South",
-                lat: 52.7156,
-                lon: 0.3928,
-                crop: "Oilseed Rape",
-                region: "Norfolk"
-            },
-            {
-                id: "F007",
-                name: "Downham Market",
-                lat: 52.6009,
-                lon: 0.3811,
-                crop: "Sugar Beet",
-                region: "Norfolk"
-            },
-            {
-                id: "F008",
-                name: "Ely Central",
-                lat: 52.3983,
-                lon: 0.2617,
-                crop: "Winter Wheat",
-                region: "Cambridgeshire"
-            },
+        const FIELDS = [
+            { id: "F001", name: "Bicker Fen", lat: 52.9135, lon: -0.1736, crop: "Winter Wheat", region: "Lincolnshire" },
+            { id: "F002", name: "Holbeach St Marks", lat: 52.8389, lon: -0.0325, crop: "Oilseed Rape", region: "Lincolnshire" },
+            { id: "F003", name: "Spalding East", lat: 52.7862, lon: -0.1532, crop: "Sugar Beet", region: "Lincolnshire" },
+            { id: "F004", name: "Wisbech North", lat: 52.6793, lon: 0.1631, crop: "Winter Barley", region: "Cambridgeshire" },
+            { id: "F005", name: "Boston West", lat: 52.9721, lon: -0.0812, crop: "Winter Wheat", region: "Lincolnshire" },
+            { id: "F006", name: "Kings Lynn South", lat: 52.7156, lon: 0.3928, crop: "Oilseed Rape", region: "Norfolk" },
+            { id: "F007", name: "Downham Market", lat: 52.6009, lon: 0.3811, crop: "Sugar Beet", region: "Norfolk" },
+            { id: "F008", name: "Ely Central", lat: 52.3983, lon: 0.2617, crop: "Winter Wheat", region: "Cambridgeshire" },
         ];
 
-        const map = L.map("map").setView([52.75, 0.10], 9);
+        const CITIES = [
+            { name: "London", lat: 51.5074, lon: -0.1278 },
+            { name: "Birmingham", lat: 52.4862, lon: -1.8904 },
+            { name: "Manchester", lat: 53.4808, lon: -2.2426 },
+            { name: "Leeds", lat: 53.8008, lon: -1.5491 },
+            { name: "Sheffield", lat: 53.3811, lon: -1.4701 },
+            { name: "Liverpool", lat: 53.4084, lon: -2.9916 },
+            { name: "Bristol", lat: 51.4545, lon: -2.5879 },
+            { name: "Edinburgh", lat: 55.9533, lon: -3.1883 },
+            { name: "Glasgow", lat: 55.8642, lon: -4.2518 },
+            { name: "Cardiff", lat: 51.4816, lon: -3.1791 },
+            { name: "Newcastle", lat: 54.9783, lon: -1.6178 },
+            { name: "Nottingham", lat: 52.9548, lon: -1.1581 },
+            { name: "Leicester", lat: 52.6369, lon: -1.1398 },
+            { name: "Norwich", lat: 52.6309, lon: 1.2974 },
+            { name: "Cambridge", lat: 52.2053, lon: 0.1218 },
+            { name: "Oxford", lat: 51.7520, lon: -1.2577 },
+            { name: "York", lat: 53.9590, lon: -1.0815 },
+            { name: "Lincoln", lat: 53.2307, lon: -0.5406 },
+            { name: "Peterborough", lat: 52.5695, lon: -0.2405 },
+            { name: "Derby", lat: 52.9225, lon: -1.4746 },
+        ];
+
+        const map = L.map("map").setView([52.75, 0.10], 7);
 
         L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
             attribution: "© OpenStreetMap © CARTO",
             maxZoom: 18,
         }).addTo(map);
 
+        // City marker icon
+        function makeCityIcon() {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+                <circle cx="14" cy="14" r="5" fill="#94a3b8" fill-opacity="0.9"/>
+                <circle cx="14" cy="14" r="9" fill="none" stroke="#94a3b8" stroke-width="1" stroke-opacity="0.4"/>
+            </svg>`;
+            return L.divIcon({ html: svg, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
+        }
+
+        // Field marker icon
         function makeIcon(color) {
             const c = color === "red" ? "#ef4444" : color === "amber" ? "#f97316" : "#22c55e";
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="9" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2"/>
-        <circle cx="12" cy="12" r="4" fill="${c}"/>
-      </svg>`;
-            return L.divIcon({
-                html: svg,
-                className: "",
-                iconSize: [24, 24],
-                iconAnchor: [12, 12]
-            });
+                <circle cx="12" cy="12" r="9" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2"/>
+                <circle cx="12" cy="12" r="4" fill="${c}"/>
+            </svg>`;
+            return L.divIcon({ html: svg, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
         }
+
+        // Add city markers
+        CITIES.forEach(city => {
+            L.marker([city.lat, city.lon], { icon: makeCityIcon(), zIndexOffset: -100 })
+                .addTo(map)
+                .bindTooltip(city.name, {
+                    permanent: true,
+                    direction: "top",
+                    offset: [0, -10],
+                    className: "leaflet-tooltip-city",
+                    opacity: 0.85,
+                });
+        });
 
         async function fetchPrediction(fieldId) {
             const today = new Date().toISOString().split("T")[0];
             const resp = await fetch(`${API_BASE}/predict`, {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    field_id: fieldId,
-                    event_timestamp: today + "T00:00:00"
-                }),
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ field_id: fieldId, event_timestamp: today + "T00:00:00" }),
             });
             if (!resp.ok) throw new Error(`API error: ${resp.status}`);
             return resp.json();
         }
 
         FIELDS.forEach(field => {
-            const marker = L.marker([field.lat, field.lon], {
-                icon: makeIcon("green")
-            }).addTo(map);
+            const marker = L.marker([field.lat, field.lon], { icon: makeIcon("green") }).addTo(map);
 
             marker.on("click", async () => {
                 marker.bindPopup(`
-          <div class="popup-field-name">${field.name}</div>
-          <div style="text-align:center;padding:12px 0"><div class="loading-ring"></div></div>
-          <div class="popup-meta">${field.crop} · ${field.region}</div>
-        `).openPopup();
+                    <div class="popup-field-name">${field.name}</div>
+                    <div style="text-align:center;padding:12px 0"><div class="loading-ring"></div></div>
+                    <div class="popup-meta">${field.crop} · ${field.region}</div>
+                `).openPopup();
 
                 try {
                     const data = await fetchPrediction(field.id);
-                    const badgeClass = data.drift_level === "red" ? "badge-red" : data
-                        .drift_level === "amber" ? "badge-amber" : "badge-green";
-                    const badgeText = data.drift_level === "red" ? "⚠ High Drift" : data
-                        .drift_level === "amber" ? "⚡ Moderate Drift" : "✓ Stable";
+                    const badgeClass = data.drift_level === "red" ? "badge-red" : data.drift_level === "amber" ? "badge-amber" : "badge-green";
+                    const badgeText = data.drift_level === "red" ? "⚠ High Drift" : data.drift_level === "amber" ? "⚡ Moderate Drift" : "✓ Stable";
 
                     marker.setIcon(makeIcon(data.drift_level));
                     marker.getPopup().setContent(`
-            <div class="popup-field-name">${field.name}</div>
-            <div class="popup-yield">${Math.round(data.predicted_yield_kg_ha).toLocaleString()}</div>
-            <div class="popup-unit">kg / hectare</div>
-            <div class="popup-ci">80% CI: ${Math.round(data.lower_bound).toLocaleString()} – ${Math.round(data.upper_bound).toLocaleString()} kg/ha</div>
-            <span class="popup-badge ${badgeClass}">${badgeText}</span>
-            <div class="popup-meta">${field.crop} · ${field.region}</div>
-            <div class="popup-meta">Model v${data.model_version} · ${new Date(data.last_updated).toLocaleString("en-GB")}</div>
-            ${data.stale_features ? '<div class="popup-meta" style="color:#f87171">⚠ Stale features</div>' : ''}
-          `);
+                        <div class="popup-field-name">${field.name}</div>
+                        <div class="popup-yield">${Math.round(data.predicted_yield_kg_ha).toLocaleString()}</div>
+                        <div class="popup-unit">kg / hectare</div>
+                        <div class="popup-ci">80% CI: ${Math.round(data.lower_bound).toLocaleString()} – ${Math.round(data.upper_bound).toLocaleString()} kg/ha</div>
+                        <span class="popup-badge ${badgeClass}">${badgeText}</span>
+                        <div class="popup-meta">${field.crop} · ${field.region}</div>
+                        <div class="popup-meta">Model v${data.model_version} · ${new Date(data.last_updated).toLocaleString("en-GB")}</div>
+                        ${data.stale_features ? '<div class="popup-meta" style="color:#f87171">⚠ Stale features</div>' : ''}
+                    `);
                 } catch (err) {
                     marker.getPopup().setContent(`
-            <div class="popup-field-name">${field.name}</div>
-            <div style="color:#f87171;font-size:0.85rem">Failed to load prediction.<br>${err.message}</div>
-          `);
+                        <div class="popup-field-name">${field.name}</div>
+                        <div style="color:#f87171;font-size:0.85rem">Failed to load prediction.<br>${err.message}</div>
+                    `);
                 }
             });
         });
