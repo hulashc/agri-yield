@@ -5,9 +5,13 @@ Population Stability Index (PSI) drift detector.
 Compares live request feature distributions against a reference
 distribution built from NASA POWER historical data.
 
-PSI < 0.10  → green  (no action)
-PSI 0.10–0.20 → amber  (log warning)
-PSI > 0.20  → red    (trigger retraining)
+PSI < 0.25  → green  (no action)
+PSI 0.25–0.50 → amber  (log warning)
+PSI > 0.50  → red    (trigger retraining)
+
+Note: thresholds are intentionally wider than the classic 0.10/0.20
+because training data uses synthetic/proxy values. PSI is only meaningful
+once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
 """
 
 import numpy as np
@@ -19,8 +23,12 @@ from monitoring.prometheus_metrics import DRIFT_WARNINGS_TOTAL, PSI_SCORE, DRIFT
 
 logger = logging.getLogger(__name__)
 
-PSI_AMBER = 0.10
-PSI_RED = 0.20
+PSI_AMBER = 0.25
+PSI_RED = 0.50
+
+# Minimum number of live samples required before PSI is meaningful.
+# Below this threshold we return green and skip computation entirely.
+MIN_CURRENT_SAMPLES = 30
 
 MONITORED_FEATURES = [
     "rainfall_today_mm",
@@ -31,6 +39,20 @@ MONITORED_FEATURES = [
     "gdd_accumulation",
     "ndvi_latest",
 ]
+
+# Rolling buffer: field_id → feature → list of recent values
+_live_buffer: dict = {}
+BUFFER_SIZE = 500
+
+
+def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray:
+    """Append a live value to the rolling buffer and return the current window."""
+    _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
+    buf = _live_buffer[field_id][feature]
+    buf.append(value)
+    if len(buf) > BUFFER_SIZE:
+        buf.pop(0)
+    return np.array(buf)
 
 
 def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) -> float:
@@ -50,24 +72,21 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) ->
     reference = reference[~np.isnan(reference)]
     current = current[~np.isnan(current)]
 
-    if len(reference) < 10 or len(current) < 5:
-        logger.warning("Insufficient data for PSI computation, returning 0.0")
+    if len(reference) < 10 or len(current) < MIN_CURRENT_SAMPLES:
         return 0.0
 
-    # Use reference distribution to define bin edges
     breakpoints = np.percentile(reference, np.linspace(0, 100, n_bins + 1))
-    breakpoints = np.unique(breakpoints)  # Remove duplicates from flat distributions
+    breakpoints = np.unique(breakpoints)
 
-    def safe_pct(arr, bins):
+    def safe_pct(arr: np.ndarray, bins: np.ndarray) -> np.ndarray:
         counts, _ = np.histogram(arr, bins=bins)
         pct = counts / len(arr)
-        pct = np.where(pct == 0, 1e-4, pct)  # Avoid log(0)
+        pct = np.where(pct == 0, 1e-4, pct)
         return pct
 
     ref_pct = safe_pct(reference, breakpoints)
     cur_pct = safe_pct(current, breakpoints)
 
-    # Align lengths (bin count may differ if breakpoints collapsed)
     min_len = min(len(ref_pct), len(cur_pct))
     ref_pct = ref_pct[:min_len]
     cur_pct = cur_pct[:min_len]
@@ -81,12 +100,10 @@ def load_reference_distribution(
 ) -> np.ndarray:
     """
     Load the reference distribution for a feature from saved Parquet files.
-    Uses the last full growing season (prior calendar year).
     """
     root = Path(data_root)
     all_files = list(root.glob("*/[0-9][0-9][0-9][0-9].parquet"))
 
-    # Map internal feature name to NASA POWER column
     nasa_col_map = {
         "rainfall_today_mm": "PRECTOTCORR",
         "t2m_max_today": "T2M_MAX",
@@ -120,25 +137,9 @@ def evaluate_drift(
     reference_cache: Optional[dict] = None,
 ) -> dict:
     """
-    Run PSI for each monitored feature.
-    Returns a dict with per-feature PSI scores and overall drift level.
-
-    Args:
-        field_id:        Field identifier (for Prometheus labels)
-        live_features:   Dict of feature_name → float (current request)
-        reference_cache: Optional pre-loaded reference arrays (avoid re-reading parquet)
-
-    Returns:
-        {
-          "max_psi": float,
-          "drift_warning": bool,
-          "drift_level": "green" | "amber" | "red",
-          "psi_scores": {feature: psi_value, ...}
-        }
+    Run PSI for each monitored feature using a rolling buffer of live values.
+    Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
     """
-    # Build a "current" distribution from the single live request
-    # In production this is a rolling window of the last N requests
-    # For now, we use the single value compared against reference
     psi_scores = {}
 
     for feature in MONITORED_FEATURES:
@@ -146,30 +147,30 @@ def evaluate_drift(
         if val is None:
             continue
 
+        current = _append_to_buffer(field_id, feature, float(val))
+
+        if len(current) < MIN_CURRENT_SAMPLES:
+            psi_scores[feature] = 0.0
+            PSI_SCORE.labels(feature_name=feature).set(0.0)
+            continue
+
         ref = (
             reference_cache.get(feature)
             if reference_cache
             else load_reference_distribution(feature)
         )
-        if ref is not None and len(ref) == 0:
+        if ref is None or len(ref) == 0:
             continue
-
-        # Simulate a small current distribution from the single value
-        # (In production: maintain a rolling buffer of last 500 requests)
-        noise = np.random.normal(0, abs(val) * 0.01 + 0.001, 50)
-        current = np.array([val] * 50) + noise
 
         psi = compute_psi(ref, current)
         psi_scores[feature] = round(psi, 4)
-
-        # Push to Prometheus
         PSI_SCORE.labels(feature_name=feature).set(psi)
 
         if psi > PSI_RED:
             DRIFT_WARNINGS_TOTAL.labels(field_id=field_id, feature_name=feature).inc()
-            logger.warning(f"🔴 DRIFT RED: {field_id}/{feature} PSI={psi:.3f}")
+            logger.warning("DRIFT RED: %s/%s PSI=%.3f", field_id, feature, psi)
         elif psi > PSI_AMBER:
-            logger.info(f"🟡 DRIFT AMBER: {field_id}/{feature} PSI={psi:.3f}")
+            logger.info("DRIFT AMBER: %s/%s PSI=%.3f", field_id, feature, psi)
 
     max_psi = max(psi_scores.values()) if psi_scores else 0.0
 
