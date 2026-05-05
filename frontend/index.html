@@ -7,130 +7,33 @@
     <title>UK Field Yield Forecast</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #0f1117;
-            color: #e0e0e0;
-        }
-
-        #header {
-            padding: 16px 24px;
-            background: #1a1d27;
-            border-bottom: 1px solid #2a2d3a;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        #header h1 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #fff;
-        }
-
-        #header span {
-            font-size: 0.8rem;
-            color: #6b7280;
-        }
-
-        #map {
-            height: calc(100vh - 57px);
-            width: 100%;
-        }
-
-        .leaflet-popup-content-wrapper {
-            background: #1a1d27;
-            border: 1px solid #2a2d3a;
-            border-radius: 10px;
-            color: #e0e0e0;
-        }
-
-        .leaflet-popup-tip {
-            background: #1a1d27;
-        }
-
-        .popup-field-name {
-            font-size: 1rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #fff;
-        }
-
-        .popup-yield {
-            font-size: 1.8rem;
-            font-weight: 800;
-            color: #22c55e;
-        }
-
-        .popup-unit {
-            font-size: 0.8rem;
-            color: #9ca3af;
-            margin-bottom: 4px;
-        }
-
-        .popup-ci {
-            font-size: 0.85rem;
-            color: #9ca3af;
-            margin-bottom: 10px;
-        }
-
-        .popup-badge {
-            display: inline-block;
-            padding: 2px 10px;
-            border-radius: 99px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .badge-green {
-            background: #14532d;
-            color: #4ade80;
-        }
-
-        .badge-amber {
-            background: #451a03;
-            color: #fb923c;
-        }
-
-        .badge-red {
-            background: #450a0a;
-            color: #f87171;
-        }
-
-        .popup-meta {
-            font-size: 0.75rem;
-            color: #6b7280;
-            margin-top: 8px;
-        }
-
-        .loading-ring {
-            border: 3px solid #2a2d3a;
-            border-top-color: #22c55e;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 0.8s linear infinite;
-            display: inline-block;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
+        #header { padding: 16px 24px; background: #1a1d27; border-bottom: 1px solid #2a2d3a; display: flex; align-items: center; gap: 12px; }
+        #header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; }
+        #header span { font-size: 0.8rem; color: #6b7280; }
+        #map { height: calc(100vh - 57px); width: 100%; }
+        .leaflet-popup-content-wrapper { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; color: #e0e0e0; }
+        .leaflet-popup-tip { background: #1a1d27; }
+        .popup-field-name { font-size: 1rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
+        .popup-yield { font-size: 1.8rem; font-weight: 800; color: #22c55e; }
+        .popup-unit { font-size: 0.8rem; color: #9ca3af; margin-bottom: 4px; }
+        .popup-ci { font-size: 0.85rem; color: #9ca3af; margin-bottom: 10px; }
+        .popup-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; }
+        .badge-green { background: #14532d; color: #4ade80; }
+        .badge-amber { background: #451a03; color: #fb923c; }
+        .badge-red { background: #450a0a; color: #f87171; }
+        .popup-meta { font-size: 0.75rem; color: #6b7280; margin-top: 8px; }
+        .loading-ring { border: 3px solid #2a2d3a; border-top-color: #22c55e; border-radius: 50%; width: 20px; height: 20px; animation: spin 0.8s linear infinite; display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .leaflet-tooltip { background: transparent; border: none; box-shadow: none; color: #94a3b8; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; }
     </style>
 </head>
 
 <body>
     <div id="header">
         <h1>🌾 UK Field Yield Forecast</h1>
-        <span>Click a field to get this season's yield prediction</span>
+        <span>Click a field marker to get this season's yield prediction</span>
     </div>
     <div id="map"></div>
 
@@ -147,6 +50,26 @@
             { id: "F006", name: "Kings Lynn South", lat: 52.7156, lon: 0.3928, crop: "Oilseed Rape", region: "Norfolk" },
             { id: "F007", name: "Downham Market", lat: 52.6009, lon: 0.3811, crop: "Sugar Beet", region: "Norfolk" },
             { id: "F008", name: "Ely Central", lat: 52.3983, lon: 0.2617, crop: "Winter Wheat", region: "Cambridgeshire" },
+            { id: "F009", name: "Thames Valley West", lat: 51.4700, lon: -0.9800, crop: "Winter Wheat", region: "Berkshire" },
+            { id: "F010", name: "Chiltern Hills North", lat: 51.7800, lon: -0.8200, crop: "Oilseed Rape", region: "Oxfordshire" },
+            { id: "F011", name: "Avon Vale", lat: 51.3800, lon: -2.3600, crop: "Winter Barley", region: "Somerset" },
+            { id: "F012", name: "Severn Plain", lat: 51.8500, lon: -2.2400, crop: "Sugar Beet", region: "Gloucestershire" },
+            { id: "F013", name: "Trent Valley", lat: 52.8500, lon: -1.3200, crop: "Winter Wheat", region: "Nottinghamshire" },
+            { id: "F014", name: "Soar Valley", lat: 52.5800, lon: -1.2000, crop: "Oilseed Rape", region: "Leicestershire" },
+            { id: "F015", name: "Peak Fringe", lat: 53.2500, lon: -1.7000, crop: "Winter Barley", region: "Derbyshire" },
+            { id: "F016", name: "Cheshire Plain", lat: 53.1500, lon: -2.5500, crop: "Sugar Beet", region: "Cheshire" },
+            { id: "F017", name: "Mersey Lowlands", lat: 53.3800, lon: -2.7200, crop: "Winter Wheat", region: "Lancashire" },
+            { id: "F018", name: "Vale of York", lat: 53.8800, lon: -1.1500, crop: "Oilseed Rape", region: "Yorkshire" },
+            { id: "F019", name: "Humber Levels", lat: 53.7200, lon: -0.5500, crop: "Winter Wheat", region: "East Yorkshire" },
+            { id: "F020", name: "Tyne Valley", lat: 54.9200, lon: -1.8500, crop: "Winter Barley", region: "Northumberland" },
+            { id: "F021", name: "Eden Valley", lat: 54.6800, lon: -2.7800, crop: "Oilseed Rape", region: "Cumbria" },
+            { id: "F022", name: "Lothian Plain", lat: 55.8800, lon: -3.0000, crop: "Winter Wheat", region: "East Lothian" },
+            { id: "F023", name: "Tayside Lowlands", lat: 56.4500, lon: -3.0200, crop: "Winter Barley", region: "Perthshire" },
+            { id: "F024", name: "Vale of Glamorgan", lat: 51.4200, lon: -3.4500, crop: "Winter Wheat", region: "South Wales" },
+            { id: "F025", name: "Hereford Plain", lat: 52.0500, lon: -2.7200, crop: "Oilseed Rape", region: "Herefordshire" },
+            { id: "F026", name: "Breckland East", lat: 52.4500, lon: 0.7800, crop: "Sugar Beet", region: "Norfolk" },
+            { id: "F027", name: "Suffolk Clay", lat: 52.1000, lon: 1.1500, crop: "Winter Wheat", region: "Suffolk" },
+            { id: "F028", name: "Essex Uplands", lat: 51.8700, lon: 0.5500, crop: "Oilseed Rape", region: "Essex" },
         ];
 
         const CITIES = [
@@ -172,23 +95,20 @@
             { name: "Derby", lat: 52.9225, lon: -1.4746 },
         ];
 
-        const map = L.map("map").setView([52.75, 0.10], 7);
+        const map = L.map("map").setView([53.5, -2.0], 6);
 
         L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
             attribution: "© OpenStreetMap © CARTO",
             maxZoom: 18,
         }).addTo(map);
 
-        // City marker icon
         function makeCityIcon() {
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-                <circle cx="14" cy="14" r="5" fill="#94a3b8" fill-opacity="0.9"/>
-                <circle cx="14" cy="14" r="9" fill="none" stroke="#94a3b8" stroke-width="1" stroke-opacity="0.4"/>
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
+                <circle cx="5" cy="5" r="4" fill="#475569" stroke="#94a3b8" stroke-width="1"/>
             </svg>`;
-            return L.divIcon({ html: svg, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
+            return L.divIcon({ html: svg, className: "", iconSize: [10, 10], iconAnchor: [5, 5] });
         }
 
-        // Field marker icon
         function makeIcon(color) {
             const c = color === "red" ? "#ef4444" : color === "amber" ? "#f97316" : "#22c55e";
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
@@ -198,16 +118,14 @@
             return L.divIcon({ html: svg, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
         }
 
-        // Add city markers
         CITIES.forEach(city => {
             L.marker([city.lat, city.lon], { icon: makeCityIcon(), zIndexOffset: -100 })
                 .addTo(map)
                 .bindTooltip(city.name, {
                     permanent: true,
                     direction: "top",
-                    offset: [0, -10],
-                    className: "leaflet-tooltip-city",
-                    opacity: 0.85,
+                    offset: [0, -6],
+                    opacity: 0.9,
                 });
         });
 
@@ -224,19 +142,16 @@
 
         FIELDS.forEach(field => {
             const marker = L.marker([field.lat, field.lon], { icon: makeIcon("green") }).addTo(map);
-
             marker.on("click", async () => {
                 marker.bindPopup(`
                     <div class="popup-field-name">${field.name}</div>
                     <div style="text-align:center;padding:12px 0"><div class="loading-ring"></div></div>
                     <div class="popup-meta">${field.crop} · ${field.region}</div>
                 `).openPopup();
-
                 try {
                     const data = await fetchPrediction(field.id);
                     const badgeClass = data.drift_level === "red" ? "badge-red" : data.drift_level === "amber" ? "badge-amber" : "badge-green";
                     const badgeText = data.drift_level === "red" ? "⚠ High Drift" : data.drift_level === "amber" ? "⚡ Moderate Drift" : "✓ Stable";
-
                     marker.setIcon(makeIcon(data.drift_level));
                     marker.getPopup().setContent(`
                         <div class="popup-field-name">${field.name}</div>
