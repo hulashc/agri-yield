@@ -1,80 +1,86 @@
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 
+import mlflow
 import mlflow.xgboost
 import numpy as np
 import pandas as pd
 
+from training.utils.features import FEATURE_COLS
+
+log = logging.getLogger(__name__)
+
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "agri-yield-xgb")
-MODEL_STAGE = os.getenv("MODEL_STAGE", "Production")
-CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))  # ±15% confidence interval
+MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
+CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))
+MODEL_CACHE_PATH = "/tmp/mlflow_model_cache"
 
 _model = None
-_model_version: str = "unknown"
+_model_version: str = "not_loaded"
+_model_feature_cols: list[str] = []
 
 
-def load_model() -> None:
-    global _model, _model_version
+def load_model() -> bool:
+    global _model, _model_version, _model_feature_cols
+    try:
+        Path(MODEL_CACHE_PATH).mkdir(parents=True, exist_ok=True)
 
-    client = mlflow.tracking.MlflowClient()
-    versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
-    prod = [v for v in versions if v.current_stage == MODEL_STAGE]
-    if not prod:
-        raise RuntimeError(f"No {MODEL_STAGE} model found for {REGISTERED_MODEL_NAME}")
-    latest = sorted(prod, key=lambda v: int(v.version))[-1]
-    _model_version = latest.version
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        os.environ["MLFLOW_TRACKING_URI"] = MLFLOW_TRACKING_URI
 
-    model_uri = f"models:/{REGISTERED_MODEL_NAME}/{MODEL_STAGE}"
-    _model = mlflow.xgboost.load_model(model_uri)
+        client = mlflow.tracking.MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+        version = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, MODEL_ALIAS)
+        _model_version = version.version
+
+        model_uri = f"models:/{REGISTERED_MODEL_NAME}@{MODEL_ALIAS}"
+        _model = mlflow.xgboost.load_model(model_uri, dst_path=MODEL_CACHE_PATH)
+
+        # Derive the exact feature list the model was trained on
+        booster = _model.get_booster()
+        _model_feature_cols = booster.feature_names or FEATURE_COLS
+        log.info(
+            "Loaded model '%s' @%s (version %s) — %d features: %s",
+            REGISTERED_MODEL_NAME, MODEL_ALIAS, _model_version,
+            len(_model_feature_cols), _model_feature_cols,
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "Could not load model '%s' @%s: %s — "
+            "API will start but /predict returns 503 until a model is available.",
+            REGISTERED_MODEL_NAME, MODEL_ALIAS, exc,
+        )
+        return False
+
+
+def is_loaded() -> bool:
+    return _model is not None
 
 
 def get_model():
     if _model is None:
-        raise RuntimeError("Model not loaded. Call load_model() at startup.")
+        raise RuntimeError("model_not_ready")
     return _model
 
-
-# Exact column order the model was trained on — must match train.py
-FEATURE_COLS = [
-    "crop_type",
-    "soil_temp_mean",
-    "soil_temp_std",
-    "moisture_mean",
-    "moisture_std",
-    "ph_mean",
-    "nitrogen_mean",
-    "phosphorus_mean",
-    "potassium_mean",
-    "air_temp_mean",
-    "precip_total",
-    "humidity_mean",
-    "wind_speed_mean",
-    "latest_ndvi",
-    "cloud_cover_pct",
-    "ndvi_interpolated",
-    "ndvi_proxied",
-]
 
 NON_FEATURE_COLS = ["field_id", "event_timestamp"]
 
 
-def predict(
-    feature_df: pd.DataFrame,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def predict(feature_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     model = get_model()
-
-    # Drop entity columns, cast to numeric
-    df = feature_df.drop(
-        columns=[c for c in NON_FEATURE_COLS if c in feature_df.columns]
-    )
+    df = feature_df.drop(columns=[c for c in NON_FEATURE_COLS if c in feature_df.columns])
     df = df.apply(pd.to_numeric, errors="coerce").fillna(0)
 
-    # Add missing columns with default 0, then select in exact training order
-    for col in FEATURE_COLS:
+    # Use the exact feature columns the loaded model was trained on
+    cols = _model_feature_cols if _model_feature_cols else FEATURE_COLS
+    for col in cols:
         if col not in df.columns:
             df[col] = 0
-    df = df[FEATURE_COLS]
+    df = df[cols]
 
     preds = model.predict(df)
     lower = preds * (1 - CI_WIDTH)
@@ -83,4 +89,4 @@ def predict(
 
 
 def model_version() -> str:
-    return _model_version
+    return str(_model_version)
