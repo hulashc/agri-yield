@@ -234,7 +234,7 @@
                 },
                 body: JSON.stringify({
                     field_id: fieldId,
-                    prediction_date: today
+                    event_timestamp: today + "T00:00:00"
                 }),
             });
             if (!resp.ok) throw new Error(`API error: ${resp.status}`);
