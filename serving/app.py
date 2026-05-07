@@ -8,6 +8,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -29,19 +30,23 @@ from serving.schemas import PredictRequest
 
 log = logging.getLogger(__name__)
 
-# Support absolute path via env var (set in Dockerfile.prod) or fall back to relative
-FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", "data/seed/uk_fields.csv")
+# Resolve uk_fields.csv relative to repo root (/app in Docker)
+# Falls back to env var override (Render dashboard / docker-compose)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
+FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load model and field metadata at startup. Failures are non-fatal."""
+    """Load model and field metadata at startup."""
     global _FIELDS_DF
     try:
+        log.info("Loading fields from: %s", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.read_csv(FIELDS_CSV_PATH).set_index("field_id")
-        log.info("Loaded %d fields from %s", len(_FIELDS_DF), FIELDS_CSV_PATH)
+        log.info("Loaded %d fields", len(_FIELDS_DF))
     except FileNotFoundError:
-        log.warning("%s not found — /predict will return 503 until data is seeded.", FIELDS_CSV_PATH)
+        log.warning("%s not found — /predict will 503 until data is seeded.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
 
     load_model()
@@ -50,7 +55,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agri Yield API", version="0.1.0", lifespan=lifespan)
 
-# CORS — allow requests from local dev, GitHub Pages, and any Vercel deployment
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -70,14 +74,14 @@ app.include_router(metrics_router)
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
 
-def get_field_meta(field_id: str) -> dict:  # type: ignore[type-arg]
+def get_field_meta(field_id: str) -> dict:  # type-ignore[type-arg]
     if _FIELDS_DF.empty or field_id not in _FIELDS_DF.index:
         raise HTTPException(status_code=404, detail=f"Unknown field_id: {field_id}")
     return _FIELDS_DF.loc[field_id].to_dict()
 
 
 @app.get("/health")
-def health() -> dict:  # type: ignore[type-arg]
+def health() -> dict:  # type-ignore[type-arg]
     return {
         "status": "ok",
         "model_loaded": model_module.is_loaded(),
@@ -87,15 +91,11 @@ def health() -> dict:  # type: ignore[type-arg]
 
 
 @app.post("/predict")
-async def predict(request: PredictRequest) -> dict:  # type: ignore[type-arg]
+async def predict(request: PredictRequest) -> dict:  # type-ignore[type-arg]
     if not model_module.is_loaded():
-        raise HTTPException(
-            status_code=503,
-            detail="No Production model available. Run training/train.py then training/promote.py first.",
-        )
+        raise HTTPException(status_code=503, detail="No model available.")
 
     start = time.time()
-
     field_meta = get_field_meta(request.field_id)
     live = get_live_features(
         request.field_id,
@@ -107,7 +107,6 @@ async def predict(request: PredictRequest) -> dict:  # type: ignore[type-arg]
         STALE_FEATURE_REQUESTS.labels(field_id=request.field_id).inc()
 
     features = {**field_meta, **live}
-
     drift_result = evaluate_drift(request.field_id, features)
     feat_df = pd.DataFrame([features])
     preds, lower, upper = model_module.predict(feat_df)
