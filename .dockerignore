@@ -1,7 +1,8 @@
 .venv
 mlflow.db
 mlruns/
-data/
+data/features/
+data/raw/
 __pycache__
 .git
 *.pyc
