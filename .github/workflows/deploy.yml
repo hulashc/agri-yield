@@ -24,8 +24,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install training dependencies directly
+      - name: Install training dependencies
         run: |
+          set -e
           pip install --upgrade pip
           pip install \
             numpy pandas scikit-learn xgboost pyarrow \
@@ -34,15 +35,20 @@ jobs:
             mlflow
 
       - name: Generate synthetic training data
-        run: python generate_data.py
+        run: |
+          set -e
+          python generate_data.py
 
       - name: Train model and save model.pkl
-        run: python training/train_and_export.py
+        run: |
+          set -e
+          python training/train_and_export.py
 
       - name: Verify model.pkl exists
         run: |
+          set -e
           ls -lh model.pkl
-          echo "Model trained successfully"
+          echo "model.pkl ready"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -65,4 +71,4 @@ jobs:
         if: env.RENDER_DEPLOY_HOOK != ''
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: curl -s "$RENDER_DEPLOY_HOOK"
+        run: curl -fsSL "$RENDER_DEPLOY_HOOK"

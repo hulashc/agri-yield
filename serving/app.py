@@ -30,7 +30,9 @@ from serving.schemas import PredictRequest
 
 log = logging.getLogger(__name__)
 
-# Absolute path resolved from this file's location: serving/app.py -> /app/data/seed/uk_fields.csv
+# Absolute path resolved from this file's location.
+# serving/app.py is at /app/serving/app.py in Docker,
+# so parent.parent = /app regardless of launch directory.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)

@@ -1,36 +1,37 @@
-# Production Dockerfile — model.pkl baked in, no MLflow dependency at runtime
+# ── Stage 1: install Python deps ──────────────────────────────────────────────
 FROM python:3.13-slim AS builder
 WORKDIR /app
 
-RUN pip install uv
+RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --python /usr/local/bin/python3.13
 
+# ── Stage 2: lean runtime image ───────────────────────────────────────────────
 FROM python:3.13-slim AS runtime
 WORKDIR /app
 
 COPY --from=builder /app/.venv ./.venv
 
-# Application code
-COPY serving/ ./serving/
-COPY ingestion/ ./ingestion/
+# Application source
+COPY serving/    ./serving/
+COPY ingestion/  ./ingestion/
 COPY monitoring/ ./monitoring/
-COPY training/ ./training/
+COPY training/   ./training/
 COPY features/feast_repo/ ./features/feast_repo/
 
-# Seed data and trained model
+# Seed data and trained model (baked in by CI train step)
 COPY data/seed/ ./data/seed/
-COPY model.pkl ./model.pkl
+COPY model.pkl  ./model.pkl
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-# Absolute paths so they resolve regardless of working directory
+# PYTHONPATH ensures `from training.utils.features import ...` resolves
+ENV PYTHONPATH=/app
+# Disable MLflow at runtime — we use the baked-in model.pkl instead
+ENV MLFLOW_TRACKING_URI=disabled
+# Absolute paths as belt-and-braces (serving/* also resolves via __file__)
 ENV PICKLE_MODEL_PATH=/app/model.pkl
 ENV FIELDS_CSV_PATH=/app/data/seed/uk_fields.csv
-ENV MLFLOW_TRACKING_URI=disabled
 
 EXPOSE 8000
-
-# Explicitly set workdir and run from /app so relative imports also work
-WORKDIR /app
 CMD ["uvicorn", "serving.app:app", "--host", "0.0.0.0", "--port", "8000"]
