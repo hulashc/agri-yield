@@ -27,3 +27,88 @@ F025,Hereford Plain,52.0500,-2.7200,oilseed_rape,Herefordshire,33.0,sandy_loam
 F026,Breckland East,52.4500,0.7800,sugar_beet,Norfolk,46.0,loamy_sand
 F027,Suffolk Clay,52.1000,1.1500,winter_wheat,Suffolk,42.0,clay_loam
 F028,Essex Uplands,51.8700,0.5500,oilseed_rape,Essex,37.0,chalky_loam
+F029,York Vale,53.9599,-1.0873,winter_barley,Yorkshire,61.0,silty_clay_loam
+F030,Malton North,54.1356,-0.8007,winter_wheat,Yorkshire,53.5,chalk
+F031,Thirsk Moor,54.2317,-1.3451,oilseed_rape,Yorkshire,45.0,sandy_clay_loam
+F032,Hereford Meadow,52.0567,-2.7160,spring_barley,Herefordshire,28.0,red_sandstone
+F033,Ledbury Vale,52.0415,-2.4310,winter_wheat,Herefordshire,34.0,clay_loam
+F034,Shrewsbury East,52.7078,-2.7040,sugar_beet,Shropshire,39.5,sandy_loam
+F035,Chester Plain,53.1896,-2.8925,winter_barley,Cheshire,42.0,sandy_loam
+F036,Canterbury Downs,51.2802,1.0789,winter_wheat,Kent,58.0,chalk
+F037,Romney Marsh,51.0194,0.9013,oilseed_rape,Kent,33.0,alluvial_clay
+F038,Salisbury Plain,51.2047,-1.8297,winter_barley,Wiltshire,72.0,chalk
+F039,Vale of Evesham,52.0927,-1.9465,spring_wheat,Worcestershire,27.5,sandy_loam
+F040,Norfolk Broads,52.6237,1.5276,sugar_beet,Norfolk,41.0,peat
+F041,Framlingham East,52.2203,1.3488,winter_wheat,Suffolk,49.0,clay_loam
+F042,Bury St Edmunds North,52.2712,0.7120,sugar_beet,Suffolk,44.0,chalky_clay
+F043,Sudbury West,52.0374,0.7213,oilseed_rape,Suffolk,37.5,sandy_loam
+F044,Colchester North,51.9374,0.9062,winter_wheat,Essex,52.0,clay_loam
+F045,Chelmsford East,51.7358,0.5429,winter_barley,Essex,35.0,london_clay
+F046,Saffron Walden,52.0218,0.2451,oilseed_rape,Essex,41.0,chalky_boulder_clay
+F047,Newark Flatlands,53.0757,-0.8022,winter_wheat,Nottinghamshire,63.0,sandy_loam
+F048,Grantham South,52.8575,-0.6460,oilseed_rape,Lincolnshire,50.0,clay
+F049,Stamford West,52.6503,-0.4818,winter_barley,Lincolnshire,38.0,limestone_brash
+F050,Melton Mowbray,52.7639,-0.8887,winter_wheat,Leicestershire,46.0,clay_loam
+F051,Market Harborough,52.4764,-0.9231,oilseed_rape,Leicestershire,39.0,clay
+F052,Northampton East,52.2453,-0.8240,winter_wheat,Northamptonshire,54.0,heavy_clay
+F053,Daventry Fields,52.2616,-1.1632,spring_barley,Northamptonshire,33.0,sandy_clay_loam
+F054,Chesterfield Vale,53.2350,-1.4216,winter_barley,Derbyshire,29.0,clay_loam
+F055,Stratford-upon-Avon,52.1917,-1.7062,winter_wheat,Warwickshire,51.0,clay_loam
+F056,Rugby East,52.3680,-1.2133,oilseed_rape,Warwickshire,43.0,lias_clay
+F057,Lichfield Plain,52.6868,-1.8312,winter_barley,Staffordshire,36.0,sandy_loam
+F058,Stafford South,52.7680,-2.1247,winter_wheat,Staffordshire,44.0,clay_loam
+F059,Pershore Vale,52.1109,-2.0757,spring_wheat,Worcestershire,31.0,alluvial_loam
+F060,Droitwich Spa,52.2672,-2.1526,sugar_beet,Worcestershire,38.0,clay
+F061,Winchester Downs,51.0632,-1.3084,winter_wheat,Hampshire,67.0,chalk
+F062,Petersfield East,51.0021,-0.9360,oilseed_rape,Hampshire,41.0,chalk
+F063,Chichester Plain,50.8391,-0.7773,winter_barley,West Sussex,55.0,brickearth
+F064,Worthing North,50.8490,-0.3722,winter_wheat,West Sussex,38.0,chalk
+F065,Lewes Downs,50.8756,0.0128,oilseed_rape,East Sussex,33.0,chalk
+F066,Rye Marshes,50.9497,0.7308,winter_wheat,East Sussex,46.0,alluvial_clay
+F067,Guildford North,51.2565,-0.5756,spring_barley,Surrey,27.0,sandy_loam
+F068,Abingdon Vale,51.6716,-1.2839,winter_wheat,Oxfordshire,58.0,clay
+F069,Bicester Fields,51.9041,-1.1536,oilseed_rape,Oxfordshire,45.0,clay
+F070,Newbury West,51.4012,-1.3940,winter_barley,Berkshire,51.0,chalk
+F071,Taunton Moor,51.0193,-3.1008,spring_barley,Somerset,34.0,clay
+F072,Sedgemoor Levels,51.1547,-2.9234,winter_wheat,Somerset,48.0,alluvial_clay
+F073,Dorchester North,50.7372,-2.4390,winter_barley,Dorset,43.0,chalk
+F074,Blandford Forum,50.8586,-2.1651,oilseed_rape,Dorset,38.0,chalk
+F075,Exeter East,50.7335,-3.4172,winter_wheat,Devon,31.0,red_sandstone
+F076,Honiton Vale,50.7987,-3.1900,spring_barley,Devon,28.0,sandy_loam
+F077,Bodmin Moor Edge,50.4619,-4.6500,spring_barley,Cornwall,22.0,loamy_soil
+F078,Truro North,50.2905,-5.0521,oilseed_rape,Cornwall,26.0,clay_loam
+F079,Cirencester Wolds,51.7149,-1.9686,winter_wheat,Gloucestershire,53.0,oolitic_limestone
+F080,Gloucester Vale,51.8579,-2.2434,oilseed_rape,Gloucestershire,46.0,clay
+F081,Preston Plain,53.7632,-2.6982,winter_wheat,Lancashire,37.0,clay_loam
+F082,Blackpool Fylde,53.8176,-2.9360,winter_barley,Lancashire,32.0,sandy_loam
+F083,Lancaster Lune,54.0465,-2.7989,oilseed_rape,Lancashire,29.0,clay
+F084,Carlisle Eden,54.8951,-2.9362,spring_barley,Cumbria,41.0,red_sandstone
+F085,Penrith South,54.6595,-2.7561,winter_barley,Cumbria,35.0,clay_loam
+F086,Durham Wear,54.7753,-1.5849,winter_wheat,County Durham,48.0,clay
+F087,Darlington East,54.5240,-1.5246,oilseed_rape,County Durham,43.0,clay_loam
+F088,Morpeth Vale,55.1671,-1.6906,winter_barley,Northumberland,56.0,sandy_loam
+F089,Berwick Merse,55.7642,-2.1214,winter_wheat,Northumberland,64.0,sandy_loam
+F090,Hexham West,54.9698,-2.1006,spring_barley,Northumberland,38.0,clay_loam
+F091,Doncaster Carr,53.5228,-1.1286,winter_wheat,Yorkshire,57.0,clay
+F092,Hull Holderness,53.7445,-0.3325,oilseed_rape,Yorkshire,50.0,chalky_clay
+F093,Beverley Wolds,53.8640,-0.4261,winter_barley,Yorkshire,45.0,chalk
+F094,Driffield North,54.0057,-0.4282,winter_wheat,Yorkshire,52.0,chalk
+F095,Scarborough Moor,54.2839,-0.4028,spring_barley,Yorkshire,33.0,sandy_loam
+F096,Brecon Beacon Edge,51.9500,-3.3900,spring_barley,Powys,24.0,clay_loam
+F097,Welshpool Plain,52.6583,-3.1479,winter_wheat,Powys,36.0,clay_loam
+F098,Haverfordwest,51.8016,-4.9700,oilseed_rape,Pembrokeshire,29.0,sandy_loam
+F099,Carmarthen Vale,51.8553,-4.3100,winter_barley,Carmarthenshire,33.0,clay_loam
+F100,Barry Vale,51.3897,-3.2840,winter_wheat,Vale of Glamorgan,44.0,clay
+F101,Aberdeen Mearns,56.9570,-2.4183,spring_barley,Aberdeenshire,58.0,sandy_loam
+F102,Elgin Moray,57.6441,-3.3125,winter_wheat,Moray,62.0,sandy_loam
+F103,Forfar Strathmore,56.6442,-2.8912,spring_barley,Angus,53.0,sandy_loam
+F104,Cupar Fife,56.3196,-3.0097,oilseed_rape,Fife,47.0,clay_loam
+F105,Kelso Borders,55.5997,-2.4316,winter_wheat,Scottish Borders,59.0,clay_loam
+F106,Dumfries South,55.0713,-3.6053,spring_barley,Dumfries and Galloway,44.0,sandy_loam
+F107,Stirling Carse,56.1165,-3.9369,winter_barley,Stirlingshire,38.0,alluvial_clay
+F108,Perth Strathearn,56.3950,-3.4309,spring_barley,Perthshire,49.0,sandy_loam
+F109,Inverness Black Isle,57.5657,-4.2225,spring_barley,Highland,35.0,sandy_loam
+F110,Orkney Mainland,58.9809,-3.1413,spring_barley,Orkney,28.0,peat_loam
+F111,Fraserburgh Coast,57.6921,-2.0061,spring_barley,Aberdeenshire,31.0,sandy_loam
+F112,Stranraer Plain,54.9028,-5.0290,winter_barley,Dumfries and Galloway,26.0,sandy_loam
+F113,Ayr Lowlands,55.4628,-4.6293,winter_wheat,Ayrshire,39.0,clay_loam
