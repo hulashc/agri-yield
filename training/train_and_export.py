@@ -1,42 +1,58 @@
 """
-Standalone training script for CI.
-Trains XGBoost on synthetic data and exports model.pkl to repo root.
-No MLflow required — designed to run in GitHub Actions.
+CI training script — fully self-contained, no local package imports.
+Trains XGBoost on synthetic data and saves model.pkl to repo root.
 """
 
+import os
 import pickle
+import sys
+
+# Make sure repo root is on path so training.utils can be found
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
-
-from training.utils.features import FEATURE_COLS
+from sklearn.model_selection import train_test_split
 
 TARGET = "yield_kg_per_ha"
 OUTPUT_PATH = "model.pkl"
 
+FEATURE_COLS = [
+    "soil_temp_mean",
+    "soil_temp_std",
+    "moisture_mean",
+    "moisture_std",
+    "ph_mean",
+    "nitrogen_mean",
+    "phosphorus_mean",
+    "potassium_mean",
+    "air_temp_mean",
+    "precip_total",
+    "humidity_mean",
+    "wind_speed_mean",
+    "latest_ndvi",
+    "cloud_cover_pct",
+    "ndvi_interpolated",
+    "ndvi_proxied",
+]
 
-def train_and_export(dataset_path: str = "data/features/weekly_field_features.parquet"):
+
+def train_and_export(
+    dataset_path: str = "data/features/weekly_field_features.parquet",
+):
     print(f"Loading dataset from {dataset_path}...")
     df = pd.read_parquet(dataset_path)
     df = df.dropna(subset=[TARGET])
-
-    # Encode crop_type if still string
-    if df["crop_type"].dtype == object:
-        df["crop_type"] = LabelEncoder().fit_transform(df["crop_type"])
-
-    # Only keep feature cols that exist
-    available = [c for c in FEATURE_COLS if c in df.columns]
-    X = df[available]
-    y = df[TARGET]
+    print(f"Loaded {len(df)} rows")
 
     # Fill any missing feature cols with 0
     for col in FEATURE_COLS:
-        if col not in X.columns:
-            X[col] = 0
-    X = X[FEATURE_COLS]
+        if col not in df.columns:
+            df[col] = 0
+
+    X = df[FEATURE_COLS]
+    y = df[TARGET]
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
@@ -64,7 +80,7 @@ def train_and_export(dataset_path: str = "data/features/weekly_field_features.pa
     with open(OUTPUT_PATH, "wb") as f:
         pickle.dump(model, f)
 
-    print(f"Model saved to {OUTPUT_PATH}")
+    print(f"Model saved to {OUTPUT_PATH} ({os.path.getsize(OUTPUT_PATH) / 1024:.1f} KB)")
     return rmse
 
 

@@ -1,4 +1,4 @@
-# Production Dockerfile — model.pkl baked in, no MLflow dependency
+# Production Dockerfile — model.pkl baked in, no MLflow dependency at runtime
 FROM python:3.13-slim AS builder
 WORKDIR /app
 
@@ -26,7 +26,6 @@ COPY model.pkl ./model.pkl
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-# Tell serving/model.py to skip MLflow and load pickle directly
 ENV PICKLE_MODEL_PATH=/app/model.pkl
 ENV MLFLOW_TRACKING_URI=disabled
 
