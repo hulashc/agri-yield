@@ -21,17 +21,20 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install uv
-        run: pip install uv
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Install training dependencies directly
+        run: |
+          pip install --upgrade pip
+          pip install \
+            numpy pandas scikit-learn xgboost pyarrow \
+            fastapi uvicorn pydantic requests tenacity \
+            prometheus-client prometheus-fastapi-instrumentator \
+            mlflow
 
       - name: Generate synthetic training data
-        run: uv run python generate_data.py
+        run: python generate_data.py
 
       - name: Train model and save model.pkl
-        run: uv run python training/train_and_export.py
+        run: python training/train_and_export.py
 
       - name: Verify model.pkl exists
         run: |
