@@ -4,6 +4,7 @@ FastAPI prediction endpoint for agri-yield.
 """
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -28,16 +29,19 @@ from serving.schemas import PredictRequest
 
 log = logging.getLogger(__name__)
 
+# Support absolute path via env var (set in Dockerfile.prod) or fall back to relative
+FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", "data/seed/uk_fields.csv")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load model and field metadata at startup. Failures are non-fatal."""
     global _FIELDS_DF
     try:
-        _FIELDS_DF = pd.read_csv("data/seed/uk_fields.csv").set_index("field_id")
-        log.info("Loaded %d fields from uk_fields.csv", len(_FIELDS_DF))
+        _FIELDS_DF = pd.read_csv(FIELDS_CSV_PATH).set_index("field_id")
+        log.info("Loaded %d fields from %s", len(_FIELDS_DF), FIELDS_CSV_PATH)
     except FileNotFoundError:
-        log.warning("data/seed/uk_fields.csv not found — /predict will return 503 until data is seeded.")
+        log.warning("%s not found — /predict will return 503 until data is seeded.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
 
     load_model()
