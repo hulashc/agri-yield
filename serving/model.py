@@ -18,8 +18,7 @@ MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
 CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))
 MODEL_CACHE_PATH = "/tmp/mlflow_model_cache"
 
-# Resolve model.pkl path relative to repo root (/app in Docker)
-# Works regardless of what directory uvicorn is launched from
+# Resolve model.pkl relative to this file: serving/model.py -> /app/model.pkl
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 PICKLE_MODEL_PATH = os.getenv("PICKLE_MODEL_PATH", str(_REPO_ROOT / "model.pkl"))
 
@@ -28,13 +27,13 @@ _model_version: str = "not_loaded"
 
 
 def _load_from_mlflow() -> bool:
-    """Try MLflow registry. Skipped entirely if MLFLOW_TRACKING_URI=disabled."""
+    """Try MLflow registry. Returns False immediately if MLFLOW_TRACKING_URI=disabled."""
     global _model, _model_version
     if MLFLOW_TRACKING_URI == "disabled":
-        log.info("MLflow disabled via env var — skipping MLflow load.")
+        log.info("MLflow disabled via env — skipping.")
         return False
-    # Lazy import — only happens here, never at module load time
     try:
+        # Lazy import: mlflow is NEVER imported at module load time
         import mlflow  # noqa: PLC0415
         import mlflow.xgboost  # noqa: PLC0415
 
@@ -70,7 +69,7 @@ def _load_from_pickle() -> bool:
 
 
 def load_model() -> bool:
-    """Try MLflow first (docker-compose local dev), fall back to pickle (production)."""
+    """Try MLflow first (local docker-compose), fall back to pickle (production)."""
     if _load_from_mlflow():
         return True
     if _load_from_pickle():

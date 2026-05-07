@@ -30,8 +30,7 @@ from serving.schemas import PredictRequest
 
 log = logging.getLogger(__name__)
 
-# Resolve uk_fields.csv relative to repo root (/app in Docker)
-# Falls back to env var override (Render dashboard / docker-compose)
+# Absolute path resolved from this file's location: serving/app.py -> /app/data/seed/uk_fields.csv
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
@@ -46,7 +45,7 @@ async def lifespan(app: FastAPI):
         _FIELDS_DF = pd.read_csv(FIELDS_CSV_PATH).set_index("field_id")
         log.info("Loaded %d fields", len(_FIELDS_DF))
     except FileNotFoundError:
-        log.warning("%s not found — /predict will 503 until data is seeded.", FIELDS_CSV_PATH)
+        log.warning("%s not found — /predict will 503.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
 
     load_model()
@@ -74,14 +73,14 @@ app.include_router(metrics_router)
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
 
-def get_field_meta(field_id: str) -> dict:  # type-ignore[type-arg]
+def get_field_meta(field_id: str) -> dict:  # type: ignore[type-arg]
     if _FIELDS_DF.empty or field_id not in _FIELDS_DF.index:
         raise HTTPException(status_code=404, detail=f"Unknown field_id: {field_id}")
     return _FIELDS_DF.loc[field_id].to_dict()
 
 
 @app.get("/health")
-def health() -> dict:  # type-ignore[type-arg]
+def health() -> dict:  # type: ignore[type-arg]
     return {
         "status": "ok",
         "model_loaded": model_module.is_loaded(),
@@ -91,7 +90,7 @@ def health() -> dict:  # type-ignore[type-arg]
 
 
 @app.post("/predict")
-async def predict(request: PredictRequest) -> dict:  # type-ignore[type-arg]
+async def predict(request: PredictRequest) -> dict:  # type: ignore[type-arg]
     if not model_module.is_loaded():
         raise HTTPException(status_code=503, detail="No model available.")
 
