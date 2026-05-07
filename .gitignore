@@ -51,3 +51,10 @@ data/monitoring/
 data/monitoring/**
 
 data/monitoring/
+
+# Generated training data
+data/features/*.parquet
+data/features/weekly_field_features*
+
+# One-off scripts
+force_promote.py
