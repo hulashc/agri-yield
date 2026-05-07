@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: agri-yield-api
+    runtime: image
+    image:
+      url: ghcr.io/hulashc/agri-yield:latest
+    plan: free
+    envVars:
+      - key: PICKLE_MODEL_PATH
+        value: /app/model.pkl
+      - key: MLFLOW_TRACKING_URI
+        value: disabled
+      - key: CI_WIDTH
+        value: "0.15"
+    healthCheckPath: /health
+    autoDeploy: false
