@@ -3,13 +3,15 @@ ingestion/openmeteo_live.py
 
 Fetch live weather features from Open-Meteo for UK field coordinates.
 Used at prediction time — called by serving/app.py per request.
-Redis-cached with 1h TTL. Returns stale_features=True on cache fallback.
+Redis-cached with 1h TTL where available.
+In-memory cache used as fallback when Redis is absent (e.g. Render free tier).
+Returns stale_features=True on any cache fallback.
 """
 
 import requests
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 import redis
 
@@ -29,17 +31,46 @@ DAILY_VARIABLES = [
 
 REDIS_TTL = 3600  # 1 hour
 
-_ZERO_FEATURES = {
-    "rainfall_today_mm": 0,
-    "solar_radiation_today": 0,
-    "t2m_max_today": 0,
-    "t2m_min_today": 0,
-    "rh2m_today": 0,
-    "windspeed_today": 0,
-    "et0_today": 0,
+# --------------------------------------------------------------------------- #
+# UK seasonal defaults — used when both Redis and Open-Meteo are unavailable.
+# Based on typical May values across the UK.
+# --------------------------------------------------------------------------- #
+_UK_MAY_DEFAULTS = {
+    "rainfall_today_mm": 2.5,
+    "solar_radiation_today": 14.0,
+    "t2m_max_today": 15.0,
+    "t2m_min_today": 7.0,
+    "rh2m_today": 72.0,
+    "windspeed_today": 18.0,
+    "et0_today": 3.2,
     "forecast_date": str(date.today()),
     "stale_features": True,
 }
+
+# --------------------------------------------------------------------------- #
+# In-memory weather cache — keyed by field_id.
+# Stores (features_dict, timestamp) so we can serve fresh-ish data on timeout.
+# Survives across requests within the same process lifetime.
+# --------------------------------------------------------------------------- #
+_mem_cache: dict[str, tuple[dict, datetime]] = {}
+MEM_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+def _mem_cache_get(field_id: str) -> Optional[dict]:
+    """Return cached features if present and not expired, else None."""
+    entry = _mem_cache.get(field_id)
+    if entry is None:
+        return None
+    features, ts = entry
+    age = (datetime.utcnow() - ts).total_seconds()
+    if age > MEM_CACHE_TTL_SECONDS:
+        return None
+    return features
+
+
+def _mem_cache_set(field_id: str, features: dict) -> None:
+    _mem_cache[field_id] = (features, datetime.utcnow())
+
 
 _redis_client: Optional[redis.Redis] = None
 
@@ -48,7 +79,6 @@ def get_redis() -> redis.Redis:
     global _redis_client
     if _redis_client is None:
         import os
-
         _redis_client = redis.Redis.from_url(
             os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True
         )
@@ -64,7 +94,7 @@ def fetch_live_weather(lat: float, lon: float) -> dict:
         "timezone": "Europe/London",
         "forecast_days": 7,
     }
-    resp = requests.get(OPEN_METEO_URL, params=params, timeout=15)
+    resp = requests.get(OPEN_METEO_URL, params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -92,11 +122,17 @@ def parse_today_features(raw: dict) -> dict:
 def get_live_features(field_id: str, lat: float, lon: float) -> dict:
     """
     Return live weather features for a field.
-    Tries Redis cache first, then Open-Meteo API, then stale cache.
-    Falls back to zero-features (stale_features=True) rather than raising,
-    so prediction always runs even when Redis is unavailable (e.g. Render free tier).
+
+    Priority order:
+      1. Redis cache (if Redis is available)
+      2. Open-Meteo live API
+      3. In-memory cache (from a previous successful API call this session)
+      4. UK seasonal defaults (stale_features=True)
+
+    Never raises — prediction always runs.
     """
     cache_key = f"live_features:{field_id}:{date.today()}"
+    r = None
 
     # 1. Try Redis cache
     try:
@@ -105,18 +141,22 @@ def get_live_features(field_id: str, lat: float, lon: float) -> dict:
         if cached:
             data = json.loads(cached)
             data["stale_features"] = False
+            _mem_cache_set(field_id, data)  # keep mem cache warm too
             return data
     except Exception as e:
         logger.warning(f"Redis unavailable: {e}")
         r = None
 
-    # 2. Try Open-Meteo API
+    # 2. Try Open-Meteo live API
     try:
         raw = fetch_live_weather(lat, lon)
         features = parse_today_features(raw)
         features["stale_features"] = False
 
-        # Best-effort cache — ignore failures
+        # Write to in-memory cache
+        _mem_cache_set(field_id, features)
+
+        # Best-effort Redis write
         try:
             if r is not None:
                 r.setex(cache_key, REDIS_TTL, json.dumps(features))
@@ -126,9 +166,16 @@ def get_live_features(field_id: str, lat: float, lon: float) -> dict:
         return features
 
     except Exception as e:
-        logger.error(f"Open-Meteo API failed for {field_id}: {e}")
+        logger.warning(f"Open-Meteo API failed for {field_id}: {e}")
 
-    # 3. Try yesterday's stale cache
+    # 3. In-memory fallback (previous successful call this session)
+    mem = _mem_cache_get(field_id)
+    if mem is not None:
+        stale = {**mem, "stale_features": True}
+        logger.info(f"Serving in-memory cached features for {field_id}")
+        return stale
+
+    # 4. Yesterday's Redis stale cache
     yesterday_key = (
         f"live_features:{field_id}:{date.fromordinal(date.today().toordinal() - 1)}"
     )
@@ -138,13 +185,13 @@ def get_live_features(field_id: str, lat: float, lon: float) -> dict:
             if stale:
                 data = json.loads(stale)
                 data["stale_features"] = True
-                logger.warning(f"Serving stale features for {field_id}")
+                logger.warning(f"Serving yesterday's stale Redis features for {field_id}")
                 return data
     except Exception:
         pass
 
-    # 4. Last resort — zero features so prediction still runs
+    # 5. Last resort — UK seasonal defaults so prediction always runs
     logger.warning(
-        f"No live features available for {field_id} (no Redis, no API) — using zeros."
+        f"No live features available for {field_id} — using UK seasonal defaults."
     )
-    return {**_ZERO_FEATURES, "forecast_date": str(date.today())}
+    return {**_UK_MAY_DEFAULTS, "forecast_date": str(date.today())}

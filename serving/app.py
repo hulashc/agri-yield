@@ -37,9 +37,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
-# Limit concurrent Open-Meteo calls — free Render has 1 CPU and
-# firing 100+ simultaneous HTTP requests causes most to timeout.
-_PREDICT_SEMAPHORE = asyncio.Semaphore(10)
+# Reduced from 10 → 3: fewer simultaneous Open-Meteo requests so each one
+# is far more likely to succeed on Render's free 1-CPU instance.
+_PREDICT_SEMAPHORE = asyncio.Semaphore(3)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
@@ -61,8 +61,6 @@ async def _startup_load():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Yield FIRST so uvicorn binds the port immediately and Render's
-    # port scanner sees it. Heavy I/O (CSV + model load) runs after.
     asyncio.create_task(_startup_load())
     yield
 
@@ -203,13 +201,9 @@ async def map_ui():
       --transition: 200ms cubic-bezier(0.16,1,0.3,1);
     }
     html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
-
-    /* -- LAYOUT -- */
     #app { display: grid; grid-template-rows: 56px 1fr; height: 100dvh; }
     #map-wrap { position: relative; overflow: hidden; }
     #map { width: 100%; height: 100%; }
-
-    /* -- HEADER -- */
     header {
       display: flex; align-items: center; gap: 14px;
       padding: 0 20px;
@@ -226,10 +220,7 @@ async def map_ui():
     .logo-mark svg { color: var(--green); }
     .logo-name { font-size: 0.9rem; font-weight: 650; letter-spacing: -0.02em; color: #f1f5f9; }
     .logo-tag  { font-size: 0.68rem; color: var(--muted); margin-top: 1px; }
-
-    #stats-strip {
-      display: flex; gap: 2px; margin-left: auto; align-items: center;
-    }
+    #stats-strip { display: flex; gap: 2px; margin-left: auto; align-items: center; }
     .stat {
       display: flex; flex-direction: column; align-items: flex-end;
       padding: 0 12px; border-right: 1px solid var(--border);
@@ -240,7 +231,6 @@ async def map_ui():
     .stat-val.green { color: var(--green); }
     .stat-val.yellow { color: var(--yellow); }
     .stat-val.red { color: var(--red); }
-
     .live-pill {
       display: flex; align-items: center; gap: 6px;
       padding: 5px 12px; border-radius: 999px;
@@ -250,8 +240,6 @@ async def map_ui():
     }
     .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s ease infinite; }
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
-
-    /* -- FILTER BAR -- */
     #filter-bar {
       position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
       z-index: 900;
@@ -278,8 +266,6 @@ async def map_ui():
     .filter-btn[data-view="yield"].active  { background: var(--teal);   border-color: var(--teal); }
     .filter-btn[data-view="crop"].active   { background: var(--purple); border-color: var(--purple); }
     .filter-btn[data-view="drift"].active  { background: var(--red);    border-color: var(--red); }
-
-    /* -- SIDE PANEL -- */
     #panel {
       position: absolute; top: 12px; right: 12px; bottom: 12px;
       width: 310px; z-index: 900;
@@ -290,7 +276,6 @@ async def map_ui():
       transform: translateX(340px); transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
     }
     #panel.open { transform: translateX(0); }
-
     .panel-header {
       padding: 14px 16px 12px;
       border-bottom: 1px solid var(--border);
@@ -306,24 +291,18 @@ async def map_ui():
       font-size: 0.9rem; transition: all var(--transition); flex-shrink: 0;
     }
     .panel-close:hover { background: var(--surface2); color: var(--text); }
-
     .panel-meta {
       display: grid; grid-template-columns: 1fr 1fr;
       gap: 1px; background: var(--border); flex-shrink: 0;
     }
-    .meta-cell {
-      background: var(--surface); padding: 10px 14px;
-      display: flex; flex-direction: column; gap: 3px;
-    }
+    .meta-cell { background: var(--surface); padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
     .meta-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
     .meta-val  { font-size: 0.82rem; font-weight: 500; color: #cbd5e1; }
-
     .soil-badge {
       display: inline-block; padding: 2px 8px; border-radius: 999px;
       font-size: 0.65rem; font-weight: 500; text-transform: capitalize;
       background: rgba(165,180,252,0.1); color: #a5b4fc; border: 1px solid rgba(165,180,252,0.2);
     }
-
     #panel-yield { padding: 16px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     .yield-main  { display: flex; align-items: flex-end; gap: 6px; }
     .yield-num   { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
@@ -331,7 +310,6 @@ async def map_ui():
     .yield-ci    { font-size: 0.72rem; color: var(--muted); margin-top: 5px; }
     .yield-bar-track { margin-top: 10px; background: var(--surface2); border-radius: 999px; height: 5px; overflow: hidden; }
     .yield-bar-fill  { height: 100%; border-radius: 999px; transition: width 0.8s cubic-bezier(0.16,1,0.3,1); }
-
     #panel-weather {
       padding: 12px 16px; flex-shrink: 0;
       border-bottom: 1px solid var(--border);
@@ -341,7 +319,6 @@ async def map_ui():
     .wx-icon { font-size: 1.2rem; }
     .wx-val  { font-size: 0.78rem; font-weight: 600; color: #f1f5f9; }
     .wx-lbl  { font-size: 0.6rem; color: var(--muted); text-align: center; }
-
     #panel-badges { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
     .badge {
       display: inline-flex; align-items: center; gap: 4px;
@@ -353,7 +330,6 @@ async def map_ui():
     .badge-drift-high  { background: rgba(248,113,113,0.1); color: var(--red);    border: 1px solid rgba(248,113,113,0.25); }
     .badge-stale       { background: rgba(251,146,60,0.1);  color: var(--orange); border: 1px solid rgba(251,146,60,0.25); }
     .badge-model       { background: rgba(45,212,191,0.08); color: var(--teal);   border: 1px solid rgba(45,212,191,0.2); }
-
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { width: 24px; height: 24px; border: 2px solid var(--surface2); border-top-color: var(--green); border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
@@ -362,8 +338,6 @@ async def map_ui():
       background: linear-gradient(90deg, var(--surface2) 25%, var(--faint) 50%, var(--surface2) 75%);
       background-size:200% 100%; animation:shimmer 1.4s ease-in-out infinite;
     }
-
-    /* -- LEGEND -- */
     #legend {
       position: absolute; bottom: 20px; left: 14px; z-index: 900;
       background: var(--surface); border: 1px solid var(--border);
@@ -376,8 +350,6 @@ async def map_ui():
     .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .leg-gradient { width: 100%; height: 6px; border-radius: 999px; margin: 6px 0 4px; background: linear-gradient(90deg, #f87171, #facc15, #4ade80); }
     .leg-gradient-labels { display: flex; justify-content: space-between; font-size: 0.6rem; color: var(--muted); }
-
-    /* -- LOADING OVERLAY -- */
     #overlay {
       position: absolute; inset: 0; z-index: 9999;
       background: var(--bg);
@@ -391,8 +363,6 @@ async def map_ui():
     #progress-bar-track { width: 200px; height: 3px; background: var(--surface2); border-radius: 999px; overflow: hidden; margin-top: 8px; }
     #progress-bar-fill  { height: 100%; width: 0%; background: var(--green); border-radius: 999px; transition: width 0.4s ease; }
     #overlay-status { font-size: 0.72rem; color: var(--muted); min-height: 1em; }
-
-    /* -- LEAFLET DARK THEME -- */
     .leaflet-container { background: var(--bg) !important; }
     .leaflet-control-zoom a { background: var(--surface) !important; color: #94a3b8 !important; border-color: var(--border) !important; }
     .leaflet-control-zoom a:hover { background: var(--surface2) !important; color: var(--text) !important; }
@@ -401,7 +371,6 @@ async def map_ui():
     .leaflet-popup-content-wrapper { background: var(--surface) !important; border: 1px solid var(--border) !important; border-radius: 8px !important; color: var(--text) !important; box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important; }
     .leaflet-popup-tip { background: var(--surface) !important; }
     .leaflet-popup-content { margin: 10px 14px !important; font-size: 0.78rem !important; line-height: 1.5; }
-
     @media (max-width: 600px) {
       #panel { left: 0; right: 0; top: auto; bottom: 0; width: 100%; height: 65vh; border-radius: var(--radius) var(--radius) 0 0; transform: translateY(100%); }
       #panel.open { transform: translateY(0); }
@@ -437,10 +406,8 @@ async def map_ui():
     </div>
     <div class="live-pill"><div class="live-dot"></div>Live</div>
   </header>
-
   <div id="map-wrap">
     <div id="map"></div>
-
     <div id="filter-bar">
       <button class="filter-btn active" data-crop="all">All</button>
       <button class="filter-btn" data-crop="winter_wheat">Wheat</button>
@@ -452,7 +419,6 @@ async def map_ui():
       <button class="filter-btn" data-view="crop">Crop</button>
       <button class="filter-btn" data-view="drift">Drift</button>
     </div>
-
     <div id="panel">
       <div class="panel-header">
         <div>
@@ -483,7 +449,6 @@ async def map_ui():
       </div>
       <div id="panel-badges"></div>
     </div>
-
     <div id="legend">
       <div id="legend-title">Colour by yield</div>
       <div id="legend-body">
@@ -491,7 +456,6 @@ async def map_ui():
         <div class="leg-gradient-labels"><span>0</span><span>1 kg/ha</span></div>
       </div>
     </div>
-
     <div id="overlay">
       <div class="overlay-logo">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
@@ -508,31 +472,28 @@ async def map_ui():
     </div>
   </div>
 </div>
-
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function () {
   const CROP_COLORS = {
-    winter_wheat:   '#4ade80', spring_wheat:   '#86efac',
-    winter_barley:  '#facc15', spring_barley:  '#fde047',
-    oilseed_rape:   '#fb923c', sugar_beet:     '#38bdf8',
-    potato:         '#a78bfa',
+    winter_wheat: '#4ade80', spring_wheat: '#86efac',
+    winter_barley: '#facc15', spring_barley: '#fde047',
+    oilseed_rape: '#fb923c', sugar_beet: '#38bdf8', potato: '#a78bfa',
   };
   const CROP_LABELS = {
-    winter_wheat:  'Winter Wheat',  spring_wheat:  'Spring Wheat',
+    winter_wheat: 'Winter Wheat', spring_wheat: 'Spring Wheat',
     winter_barley: 'Winter Barley', spring_barley: 'Spring Barley',
-    oilseed_rape:  'Oilseed Rape',  sugar_beet:    'Sugar Beet',
-    potato:        'Potato',
+    oilseed_rape: 'Oilseed Rape', sugar_beet: 'Sugar Beet', potato: 'Potato',
   };
   function cropColor(c) { return CROP_COLORS[c] || '#94a3b8'; }
   function lerpColor(t) {
     if (t < 0.5) {
-      const r = 248, g = Math.round(113 + (204 - 113) * (t / 0.5)), b = 113;
+      const r = 248, g = Math.round(113 + (204-113)*(t/0.5)), b = 113;
       return `rgb(${r},${g},${b})`;
     }
-    const r = Math.round(250 + (74 - 250) * ((t - 0.5) / 0.5));
-    const g = Math.round(204 + (222 - 204) * ((t - 0.5) / 0.5));
-    const b = Math.round(21  + (128 - 21)  * ((t - 0.5) / 0.5));
+    const r = Math.round(250+(74-250)*((t-0.5)/0.5));
+    const g = Math.round(204+(222-204)*((t-0.5)/0.5));
+    const b = Math.round(21+(128-21)*((t-0.5)/0.5));
     return `rgb(${r},${g},${b})`;
   }
   function markerColor(field, viewMode, minY, maxY) {
@@ -541,7 +502,7 @@ async def map_ui():
       const t = (field.predicted_yield_kg_ha - minY) / Math.max(maxY - minY, 1);
       return lerpColor(Math.max(0, Math.min(1, t)));
     }
-    if (viewMode === 'crop')  return cropColor(field.crop_type);
+    if (viewMode === 'crop') return cropColor(field.crop_type);
     if (viewMode === 'drift') {
       if (field.drift_level === 'high') return '#f87171';
       if (field.drift_level === 'low')  return '#facc15';
@@ -556,31 +517,23 @@ async def map_ui():
       <circle cx="${s/2}" cy="${s/2}" r="${r*0.42}" fill="${color}"/></svg>`;
     return L.divIcon({ html: svg, className: '', iconSize: [s,s], iconAnchor: [s/2,s/2], popupAnchor: [0,-s/2] });
   }
-
   const map = L.map('map', { center: [54, -2.5], zoom: 6, zoomControl: true });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: 'abcd', maxZoom: 19,
   }).addTo(map);
-
   let allFields = [], markers = [], activeCrop = 'all', activeView = 'yield';
   let minYield = 0, maxYield = 1;
-
   function setProgress(pct, msg) {
     document.getElementById('progress-bar-fill').style.width = pct + '%';
     document.getElementById('overlay-status').textContent = msg || '';
   }
-
-  // Retry /fields with backoff — handles the brief window where model is still loading
   function fetchFields(attempt) {
     attempt = attempt || 1;
     setProgress(10 + Math.min(attempt * 5, 50), attempt === 1 ? 'Loading field data\u2026' : 'Model loading, retrying\u2026');
     fetch('/fields')
       .then(r => {
-        if (r.status === 503 && attempt < 10) {
-          setTimeout(() => fetchFields(attempt + 1), 2000);
-          return null;
-        }
+        if (r.status === 503 && attempt < 10) { setTimeout(() => fetchFields(attempt + 1), 2000); return null; }
         return r.json();
       })
       .then(data => {
@@ -588,9 +541,7 @@ async def map_ui():
         setProgress(80, 'Rendering map\u2026');
         allFields = data.fields;
         document.getElementById('s-model').textContent = data.model_version || '\u2014';
-        computeStats();
-        buildMarkers();
-        updateLegend();
+        computeStats(); buildMarkers(); updateLegend();
         setProgress(100, 'Ready');
         setTimeout(() => {
           const ov = document.getElementById('overlay');
@@ -598,45 +549,37 @@ async def map_ui():
           setTimeout(() => ov.remove(), 700);
         }, 300);
       })
-      .catch(err => {
-        document.getElementById('overlay-status').textContent = '\u26a0 Failed: ' + err.message;
-      });
+      .catch(err => { document.getElementById('overlay-status').textContent = '\u26a0 Failed: ' + err.message; });
   }
   fetchFields();
-
   function computeStats() {
     const yields = allFields.filter(f => f.predicted_yield_kg_ha != null).map(f => f.predicted_yield_kg_ha);
     if (!yields.length) return;
-    minYield = Math.min(...yields);
-    maxYield = Math.max(...yields);
+    minYield = Math.min(...yields); maxYield = Math.max(...yields);
     const avg = yields.reduce((a, b) => a + b, 0) / yields.length;
-    const best = allFields.reduce((a, b) => (b.predicted_yield_kg_ha || 0) > (a.predicted_yield_kg_ha || 0) ? b : a);
+    const best = allFields.reduce((a, b) => (b.predicted_yield_kg_ha||0) > (a.predicted_yield_kg_ha||0) ? b : a);
     const driftCount = allFields.filter(f => f.drift_warning).length;
     document.getElementById('s-fields').textContent = allFields.length;
     document.getElementById('s-avg').textContent = avg.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    document.getElementById('s-best-val').textContent = (best.predicted_yield_kg_ha || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    document.getElementById('s-best-val').textContent = (best.predicted_yield_kg_ha||0).toLocaleString(undefined, { maximumFractionDigits: 0 });
     document.getElementById('s-best-lbl').textContent = best.name || 'Top field';
     const driftEl = document.getElementById('s-drift');
     driftEl.textContent = driftCount;
     driftEl.className = 'stat-val ' + (driftCount > 5 ? 'red' : driftCount > 0 ? 'yellow' : 'green');
   }
-
   function buildMarkers() {
-    markers.forEach(m => map.removeLayer(m.layer));
-    markers = [];
-    const filtered = activeCrop === 'all'
-      ? allFields
+    markers.forEach(m => map.removeLayer(m.layer)); markers = [];
+    const filtered = activeCrop === 'all' ? allFields
       : allFields.filter(f => f.crop_type === activeCrop || f.crop_type.includes(activeCrop.replace('winter_','').replace('spring_','')));
     filtered.forEach(f => {
       const color = markerColor(f, activeView, minYield, maxYield);
       const radius = Math.max(8, Math.min(15, 8 + (f.area_ha / 30)));
       const layer = L.marker([f.lat, f.lon], { icon: makeIcon(color, radius) }).addTo(map);
       layer.on('click', () => openPanel(f));
-      layer.bindTooltip(`<strong>${f.name}</strong><br>${(CROP_LABELS[f.crop_type] || f.crop_type)} &mdash; ${f.area_ha} ha`, { direction: 'top', offset: [0, -10] });
+      layer.bindTooltip(`<strong>${f.name}</strong><br>${(CROP_LABELS[f.crop_type]||f.crop_type)} &mdash; ${f.area_ha} ha`, { direction: 'top', offset: [0,-10] });
       markers.push({ layer, field: f });
     });
   }
-
   function updateLegend() {
     const title = document.getElementById('legend-title');
     const body  = document.getElementById('legend-body');
@@ -646,14 +589,13 @@ async def map_ui():
     } else if (activeView === 'crop') {
       title.textContent = 'Crop type';
       const crops = [...new Set(allFields.map(f => f.crop_type))];
-      body.innerHTML = crops.map(c => `<div class="leg-row"><div class="leg-dot" style="background:${cropColor(c)}"></div>${CROP_LABELS[c] || c}</div>`).join('');
+      body.innerHTML = crops.map(c => `<div class="leg-row"><div class="leg-dot" style="background:${cropColor(c)}"></div>${CROP_LABELS[c]||c}</div>`).join('');
     } else {
       title.textContent = 'Drift level';
       body.innerHTML = [['#4ade80','No drift'],['#facc15','Low drift'],['#f87171','High drift']]
         .map(([c,l]) => `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${l}</div>`).join('');
     }
   }
-
   document.querySelectorAll('[data-crop]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('[data-crop]').forEach(b => b.classList.remove('active'));
@@ -666,12 +608,10 @@ async def map_ui():
       btn.classList.add('active'); activeView = btn.dataset.view; buildMarkers(); updateLegend();
     });
   });
-
   function fmt(val, decimals, suffix) {
     if (val == null) return '\u2014';
     return Number(val).toFixed(decimals) + suffix;
   }
-
   function renderYield(f) {
     const y = f.predicted_yield_kg_ha;
     const color = y != null ? markerColor(f, 'yield', minYield, maxYield) : '#94a3b8';
@@ -684,24 +624,21 @@ async def map_ui():
     bar.style.background = color;
     setTimeout(() => { bar.style.width = pct + '%'; }, 50);
   }
-
   function renderWeather(f) {
     document.getElementById('wx-temp').textContent = fmt(f.temp_c, 1, '\u00b0C');
     document.getElementById('wx-rain').textContent = fmt(f.rainfall_mm, 1, ' mm');
     document.getElementById('wx-rad').textContent  = fmt(f.solar_rad_mj_m2, 1, ' MJ/m\u00b2');
   }
-
   function openPanel(f) {
     document.getElementById('p-id').textContent = f.field_id;
     document.getElementById('p-name').textContent = f.name || f.field_id;
-    document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type] || f.crop_type).replace(/_/g, ' ');
+    document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type]||f.crop_type).replace(/_/g,' ');
     document.getElementById('p-region').textContent = f.region || '\u2014';
     document.getElementById('p-area').textContent = f.area_ha + ' ha';
     document.getElementById('p-coords').textContent = f.lat.toFixed(3) + ', ' + f.lon.toFixed(3);
-    const soil = (f.soil_type || '').replace(/_/g, ' ');
+    const soil = (f.soil_type||'').replace(/_/g,' ');
     document.getElementById('p-soil').innerHTML = soil ? `<span class="soil-badge">${soil}</span>` : '\u2014';
-    renderYield(f);
-    renderWeather(f);
+    renderYield(f); renderWeather(f);
     const driftClass = f.drift_level === 'high' ? 'badge-drift-high' : f.drift_level === 'low' ? 'badge-drift-low' : 'badge-drift-none';
     const driftIcon  = f.drift_level === 'high' ? '\u26a0\ufe0f' : f.drift_level === 'low' ? '\u25b3' : '\u2713';
     const driftLabel = f.drift_warning ? `Drift: ${f.drift_level}` : 'No drift';
@@ -712,7 +649,6 @@ async def map_ui():
     document.getElementById('panel').classList.add('open');
     map.panTo([f.lat, f.lon], { animate: true, duration: 0.4 });
   }
-
   window.closePanel = function () {
     document.getElementById('panel').classList.remove('open');
     document.getElementById('p-bar').style.width = '0%';
