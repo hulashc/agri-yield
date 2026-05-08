@@ -16,8 +16,6 @@ COPY ingestion/ ./ingestion/
 COPY monitoring/ ./monitoring/
 COPY training/ ./training/
 COPY features/feast_repo/ ./features/feast_repo/
-COPY ingestion/ ./ingestion/
-COPY monitoring/ ./monitoring/
 
 ENV PATH="/app/.venv/bin:"
 ENV PYTHONUNBUFFERED=1
