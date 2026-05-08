@@ -29,6 +29,18 @@ DAILY_VARIABLES = [
 
 REDIS_TTL = 3600  # 1 hour
 
+_ZERO_FEATURES = {
+    "rainfall_today_mm": 0,
+    "solar_radiation_today": 0,
+    "t2m_max_today": 0,
+    "t2m_min_today": 0,
+    "rh2m_today": 0,
+    "windspeed_today": 0,
+    "et0_today": 0,
+    "forecast_date": str(date.today()),
+    "stale_features": True,
+}
+
 _redis_client: Optional[redis.Redis] = None
 
 
@@ -60,7 +72,6 @@ def fetch_live_weather(lat: float, lon: float) -> dict:
 def parse_today_features(raw: dict) -> dict:
     """Extract today's values (index 0) from the 7-day forecast."""
     daily = raw.get("daily", {})
-    # Map Open-Meteo keys → internal feature names
     mapping = {
         "precipitation_sum": "rainfall_today_mm",
         "shortwave_radiation_sum": "solar_radiation_today",
@@ -81,13 +92,15 @@ def parse_today_features(raw: dict) -> dict:
 def get_live_features(field_id: str, lat: float, lon: float) -> dict:
     """
     Return live weather features for a field.
-    Tries Redis cache first, then Open-Meteo API, then raises with stale flag.
+    Tries Redis cache first, then Open-Meteo API, then stale cache.
+    Falls back to zero-features (stale_features=True) rather than raising,
+    so prediction always runs even when Redis is unavailable (e.g. Render free tier).
     """
     cache_key = f"live_features:{field_id}:{date.today()}"
-    r = get_redis()
 
-    # 1. Try cache
+    # 1. Try Redis cache
     try:
+        r = get_redis()
         cached = r.get(cache_key)
         if cached:
             data = json.loads(cached)
@@ -95,16 +108,18 @@ def get_live_features(field_id: str, lat: float, lon: float) -> dict:
             return data
     except Exception as e:
         logger.warning(f"Redis unavailable: {e}")
+        r = None
 
-    # 2. Try API
+    # 2. Try Open-Meteo API
     try:
         raw = fetch_live_weather(lat, lon)
         features = parse_today_features(raw)
         features["stale_features"] = False
 
-        # Cache result
+        # Best-effort cache — ignore failures
         try:
-            r.setex(cache_key, REDIS_TTL, json.dumps(features))
+            if r is not None:
+                r.setex(cache_key, REDIS_TTL, json.dumps(features))
         except Exception:
             pass
 
@@ -113,18 +128,23 @@ def get_live_features(field_id: str, lat: float, lon: float) -> dict:
     except Exception as e:
         logger.error(f"Open-Meteo API failed for {field_id}: {e}")
 
-    # 3. Fallback — try yesterday's cache
+    # 3. Try yesterday's stale cache
     yesterday_key = (
         f"live_features:{field_id}:{date.fromordinal(date.today().toordinal() - 1)}"
     )
     try:
-        stale = r.get(yesterday_key)
-        if stale:
-            data = json.loads(stale)
-            data["stale_features"] = True
-            logger.warning(f"Serving stale features for {field_id}")
-            return data
+        if r is not None:
+            stale = r.get(yesterday_key)
+            if stale:
+                data = json.loads(stale)
+                data["stale_features"] = True
+                logger.warning(f"Serving stale features for {field_id}")
+                return data
     except Exception:
         pass
 
-    raise RuntimeError(f"Cannot fetch live features for {field_id} — no cache, no API")
+    # 4. Last resort — zero features so prediction still runs
+    logger.warning(
+        f"No live features available for {field_id} (no Redis, no API) — using zeros."
+    )
+    return {**_ZERO_FEATURES, "forecast_date": str(date.today())}
