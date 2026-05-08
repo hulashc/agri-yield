@@ -12,15 +12,13 @@ from training.utils.features import FEATURE_COLS
 
 log = logging.getLogger(__name__)
 
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "disabled")
 REGISTERED_MODEL_NAME = os.getenv("REGISTERED_MODEL_NAME", "agri-yield-xgb")
 MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
 CI_WIDTH = float(os.getenv("CI_WIDTH", "0.15"))
 MODEL_CACHE_PATH = "/tmp/mlflow_model_cache"
 
-# Resolve model.pkl relative to this file so it works regardless of
-# what directory uvicorn is launched from (Render, Docker, local dev).
-_REPO_ROOT = Path(__file__).resolve().parent.parent  # /app in Docker
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 PICKLE_MODEL_PATH = os.getenv("PICKLE_MODEL_PATH", str(_REPO_ROOT / "model.pkl"))
 
 _model = None
@@ -33,9 +31,6 @@ def _load_from_mlflow() -> bool:
     if MLFLOW_TRACKING_URI == "disabled":
         log.info("MLflow disabled via env — skipping.")
         return False
-    # Lazy import: mlflow is NEVER imported at module load time.
-    # This prevents FutureWarning spam and filesystem init when
-    # we only want the pickle fallback.
     try:
         import mlflow  # noqa: PLC0415
         import mlflow.xgboost  # noqa: PLC0415

@@ -40,9 +40,11 @@ FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 # firing 100+ simultaneous HTTP requests causes most to timeout.
 _PREDICT_SEMAPHORE = asyncio.Semaphore(10)
 
+_FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+
+async def _startup_load():
+    """Load CSV + model in the background so the port binds immediately."""
     global _FIELDS_DF
     try:
         log.info("Loading fields from: %s", FIELDS_CSV_PATH)
@@ -51,7 +53,16 @@ async def lifespan(app: FastAPI):
     except FileNotFoundError:
         log.warning("%s not found.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
-    load_model()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, load_model)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Yield FIRST so uvicorn binds the port immediately and Render's
+    # port scanner sees it. Heavy I/O (CSV + model load) runs after.
+    asyncio.create_task(_startup_load())
     yield
 
 
@@ -72,8 +83,6 @@ app.add_middleware(
 )
 
 app.include_router(metrics_router)
-
-_FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
 
 def get_field_meta(field_id: str) -> dict:
@@ -146,9 +155,9 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
 async def bulk_fields():
     """Return all fields with live predictions — powers the map UI."""
     if _FIELDS_DF.empty:
-        raise HTTPException(status_code=503, detail="Fields not loaded.")
+        raise HTTPException(status_code=503, detail="Fields not loaded yet — please retry in a moment.")
     if not model_module.is_loaded():
-        raise HTTPException(status_code=503, detail="Model not loaded.")
+        raise HTTPException(status_code=503, detail="Model not loaded yet — please retry in a moment.")
 
     tasks = [
         _predict_one(fid, row)
@@ -166,7 +175,7 @@ async def map_ui():
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agri Yield — UK Field Intelligence</title>
+  <title>Agri Yield &#x2014; UK Field Intelligence</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -194,12 +203,12 @@ async def map_ui():
     }
     html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
 
-    /* ── LAYOUT ── */
+    /* -- LAYOUT -- */
     #app { display: grid; grid-template-rows: 56px 1fr; height: 100dvh; }
     #map-wrap { position: relative; overflow: hidden; }
     #map { width: 100%; height: 100%; }
 
-    /* ── HEADER ── */
+    /* -- HEADER -- */
     header {
       display: flex; align-items: center; gap: 14px;
       padding: 0 20px;
@@ -217,7 +226,6 @@ async def map_ui():
     .logo-name { font-size: 0.9rem; font-weight: 650; letter-spacing: -0.02em; color: #f1f5f9; }
     .logo-tag  { font-size: 0.68rem; color: var(--muted); margin-top: 1px; }
 
-    /* Stats strip */
     #stats-strip {
       display: flex; gap: 2px; margin-left: auto; align-items: center;
     }
@@ -232,7 +240,6 @@ async def map_ui():
     .stat-val.yellow { color: var(--yellow); }
     .stat-val.red { color: var(--red); }
 
-    /* Live pill */
     .live-pill {
       display: flex; align-items: center; gap: 6px;
       padding: 5px 12px; border-radius: 999px;
@@ -243,7 +250,7 @@ async def map_ui():
     .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s ease infinite; }
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
 
-    /* ── FILTER BAR ── */
+    /* -- FILTER BAR -- */
     #filter-bar {
       position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
       z-index: 900;
@@ -271,7 +278,7 @@ async def map_ui():
     .filter-btn[data-view="crop"].active   { background: var(--purple); border-color: var(--purple); }
     .filter-btn[data-view="drift"].active  { background: var(--red);    border-color: var(--red); }
 
-    /* ── SIDE PANEL ── */
+    /* -- SIDE PANEL -- */
     #panel {
       position: absolute; top: 12px; right: 12px; bottom: 12px;
       width: 310px; z-index: 900;
@@ -310,14 +317,12 @@ async def map_ui():
     .meta-lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
     .meta-val  { font-size: 0.82rem; font-weight: 500; color: #cbd5e1; }
 
-    /* Soil badge */
     .soil-badge {
       display: inline-block; padding: 2px 8px; border-radius: 999px;
       font-size: 0.65rem; font-weight: 500; text-transform: capitalize;
       background: rgba(165,180,252,0.1); color: #a5b4fc; border: 1px solid rgba(165,180,252,0.2);
     }
 
-    /* Yield block */
     #panel-yield { padding: 16px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     .yield-main  { display: flex; align-items: flex-end; gap: 6px; }
     .yield-num   { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
@@ -326,7 +331,6 @@ async def map_ui():
     .yield-bar-track { margin-top: 10px; background: var(--surface2); border-radius: 999px; height: 5px; overflow: hidden; }
     .yield-bar-fill  { height: 100%; border-radius: 999px; transition: width 0.8s cubic-bezier(0.16,1,0.3,1); }
 
-    /* Weather strip */
     #panel-weather {
       padding: 12px 16px; flex-shrink: 0;
       border-bottom: 1px solid var(--border);
@@ -337,7 +341,6 @@ async def map_ui():
     .wx-val  { font-size: 0.78rem; font-weight: 600; color: #f1f5f9; }
     .wx-lbl  { font-size: 0.6rem; color: var(--muted); text-align: center; }
 
-    /* Drift / badges */
     #panel-badges { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
     .badge {
       display: inline-flex; align-items: center; gap: 4px;
@@ -350,11 +353,6 @@ async def map_ui():
     .badge-stale       { background: rgba(251,146,60,0.1);  color: var(--orange); border: 1px solid rgba(251,146,60,0.25); }
     .badge-model       { background: rgba(45,212,191,0.08); color: var(--teal);   border: 1px solid rgba(45,212,191,0.2); }
 
-    /* Loading / skeleton */
-    #panel-loading {
-      flex: 1; display: flex; flex-direction: column; align-items: center;
-      justify-content: center; gap: 12px; color: var(--muted); font-size: 0.8rem;
-    }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { width: 24px; height: 24px; border: 2px solid var(--surface2); border-top-color: var(--green); border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
@@ -364,7 +362,7 @@ async def map_ui():
       background-size:200% 100%; animation:shimmer 1.4s ease-in-out infinite;
     }
 
-    /* ── LEGEND ── */
+    /* -- LEGEND -- */
     #legend {
       position: absolute; bottom: 20px; left: 14px; z-index: 900;
       background: var(--surface); border: 1px solid var(--border);
@@ -375,11 +373,10 @@ async def map_ui():
     #legend-title { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; }
     .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 0.72rem; color: #94a3b8; }
     .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    /* yield gradient legend */
     .leg-gradient { width: 100%; height: 6px; border-radius: 999px; margin: 6px 0 4px; background: linear-gradient(90deg, #f87171, #facc15, #4ade80); }
     .leg-gradient-labels { display: flex; justify-content: space-between; font-size: 0.6rem; color: var(--muted); }
 
-    /* ── LOADING OVERLAY ── */
+    /* -- LOADING OVERLAY -- */
     #overlay {
       position: absolute; inset: 0; z-index: 9999;
       background: var(--bg);
@@ -394,7 +391,7 @@ async def map_ui():
     #progress-bar-fill  { height: 100%; width: 0%; background: var(--green); border-radius: 999px; transition: width 0.4s ease; }
     #overlay-status { font-size: 0.72rem; color: var(--muted); min-height: 1em; }
 
-    /* ── LEAFLET DARK THEME ── */
+    /* -- LEAFLET DARK THEME -- */
     .leaflet-container { background: var(--bg) !important; }
     .leaflet-control-zoom a { background: var(--surface) !important; color: #94a3b8 !important; border-color: var(--border) !important; }
     .leaflet-control-zoom a:hover { background: var(--surface2) !important; color: var(--text) !important; }
@@ -435,7 +432,7 @@ async def map_ui():
       <div class="stat"><span class="stat-val green" id="s-avg">&#x2014;</span><span class="stat-lbl">Avg yield kg/ha</span></div>
       <div class="stat"><span class="stat-val green" id="s-best-val">&#x2014;</span><span class="stat-lbl" id="s-best-lbl">Top field</span></div>
       <div class="stat"><span class="stat-val red" id="s-drift">&#x2014;</span><span class="stat-lbl">Drift warnings</span></div>
-      <div class="stat"><span class="stat-val" id="s-model">&#x2014;</span><span class="stat-lbl">Model</span></div>
+      <div class="stat"><span class="stat-val" id="s-model">&#x2014;</span><span class="stat-lbl">pkl-ci model</span></div>
     </div>
     <div class="live-pill"><div class="live-dot"></div>Live</div>
   </header>
@@ -443,7 +440,6 @@ async def map_ui():
   <div id="map-wrap">
     <div id="map"></div>
 
-    <!-- Filter bar -->
     <div id="filter-bar">
       <button class="filter-btn active" data-crop="all">All</button>
       <button class="filter-btn" data-crop="winter_wheat">Wheat</button>
@@ -456,7 +452,6 @@ async def map_ui():
       <button class="filter-btn" data-view="drift">Drift</button>
     </div>
 
-    <!-- Side panel -->
     <div id="panel">
       <div class="panel-header">
         <div>
@@ -477,7 +472,7 @@ async def map_ui():
           <div class="yield-num" id="p-yield">&#x2014;</div>
           <div class="yield-unit">kg / ha</div>
         </div>
-        <div class="yield-ci" id="p-ci">&#x2014;</div>
+        <div class="yield-ci" id="p-ci"></div>
         <div class="yield-bar-track"><div class="yield-bar-fill" id="p-bar" style="width:0%"></div></div>
       </div>
       <div id="panel-weather">
@@ -488,16 +483,14 @@ async def map_ui():
       <div id="panel-badges"></div>
     </div>
 
-    <!-- Legend -->
     <div id="legend">
       <div id="legend-title">Colour by yield</div>
       <div id="legend-body">
         <div class="leg-gradient"></div>
-        <div class="leg-gradient-labels"><span>Low</span><span>High</span></div>
+        <div class="leg-gradient-labels"><span>0</span><span>1 kg/ha</span></div>
       </div>
     </div>
 
-    <!-- Loading overlay -->
     <div id="overlay">
       <div class="overlay-logo">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
@@ -518,14 +511,10 @@ async def map_ui():
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function () {
-  // ── Colour helpers ──
   const CROP_COLORS = {
-    winter_wheat:   '#4ade80',
-    spring_wheat:   '#86efac',
-    winter_barley:  '#facc15',
-    spring_barley:  '#fde047',
-    oilseed_rape:   '#fb923c',
-    sugar_beet:     '#38bdf8',
+    winter_wheat:   '#4ade80', spring_wheat:   '#86efac',
+    winter_barley:  '#facc15', spring_barley:  '#fde047',
+    oilseed_rape:   '#fb923c', sugar_beet:     '#38bdf8',
     potato:         '#a78bfa',
   };
   const CROP_LABELS = {
@@ -539,12 +528,11 @@ async def map_ui():
     if (t < 0.5) {
       const r = 248, g = Math.round(113 + (204 - 113) * (t / 0.5)), b = 113;
       return `rgb(${r},${g},${b})`;
-    } else {
-      const r = Math.round(250 + (74 - 250) * ((t - 0.5) / 0.5));
-      const g = Math.round(204 + (222 - 204) * ((t - 0.5) / 0.5));
-      const b = Math.round(21 + (128 - 21) * ((t - 0.5) / 0.5));
-      return `rgb(${r},${g},${b})`;
     }
+    const r = Math.round(250 + (74 - 250) * ((t - 0.5) / 0.5));
+    const g = Math.round(204 + (222 - 204) * ((t - 0.5) / 0.5));
+    const b = Math.round(21  + (128 - 21)  * ((t - 0.5) / 0.5));
+    return `rgb(${r},${g},${b})`;
   }
   function markerColor(field, viewMode, minY, maxY) {
     if (viewMode === 'yield') {
@@ -561,59 +549,60 @@ async def map_ui():
     return '#94a3b8';
   }
   function makeIcon(color, radius) {
-    const r = radius || 10;
-    const s = r * 2 + 4;
+    const r = radius || 10, s = r * 2 + 4;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
       <circle cx="${s/2}" cy="${s/2}" r="${r}" fill="${color}" fill-opacity="0.22" stroke="${color}" stroke-width="2"/>
-      <circle cx="${s/2}" cy="${s/2}" r="${r*0.42}" fill="${color}"/>
-    </svg>`;
-    return L.divIcon({ html: svg, className: '', iconSize: [s, s], iconAnchor: [s/2, s/2], popupAnchor: [0, -s/2] });
+      <circle cx="${s/2}" cy="${s/2}" r="${r*0.42}" fill="${color}"/></svg>`;
+    return L.divIcon({ html: svg, className: '', iconSize: [s,s], iconAnchor: [s/2,s/2], popupAnchor: [0,-s/2] });
   }
 
-  // ── Map init ──
   const map = L.map('map', { center: [54, -2.5], zoom: 6, zoomControl: true });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: 'abcd', maxZoom: 19,
   }).addTo(map);
 
-  // ── State ──
-  let allFields = [];
-  let markers = [];
-  let activeCrop = 'all';
-  let activeView = 'yield';
+  let allFields = [], markers = [], activeCrop = 'all', activeView = 'yield';
   let minYield = 0, maxYield = 1;
-  let activeField = null;
 
-  // ── Progress bar ──
   function setProgress(pct, msg) {
     document.getElementById('progress-bar-fill').style.width = pct + '%';
     document.getElementById('overlay-status').textContent = msg || '';
   }
 
-  // ── Fetch all fields ──
-  setProgress(10, 'Loading field data\u2026');
-  fetch('/fields')
-    .then(r => r.json())
-    .then(data => {
-      setProgress(70, 'Rendering map\u2026');
-      allFields = data.fields;
-      document.getElementById('s-model').textContent = data.model_version || '\u2014';
-      computeStats();
-      buildMarkers();
-      updateLegend();
-      setProgress(100, 'Ready');
-      setTimeout(() => {
-        const ov = document.getElementById('overlay');
-        ov.classList.add('fade-out');
-        setTimeout(() => ov.remove(), 700);
-      }, 300);
-    })
-    .catch(err => {
-      document.getElementById('overlay-status').textContent = '\u26a0 Failed to load: ' + err.message;
-    });
+  // Retry /fields with backoff — handles the brief window where model is still loading
+  function fetchFields(attempt) {
+    attempt = attempt || 1;
+    setProgress(10 + Math.min(attempt * 5, 50), attempt === 1 ? 'Loading field data\u2026' : 'Model loading, retrying\u2026');
+    fetch('/fields')
+      .then(r => {
+        if (r.status === 503 && attempt < 10) {
+          setTimeout(() => fetchFields(attempt + 1), 2000);
+          return null;
+        }
+        return r.json();
+      })
+      .then(data => {
+        if (!data) return;
+        setProgress(80, 'Rendering map\u2026');
+        allFields = data.fields;
+        document.getElementById('s-model').textContent = data.model_version || '\u2014';
+        computeStats();
+        buildMarkers();
+        updateLegend();
+        setProgress(100, 'Ready');
+        setTimeout(() => {
+          const ov = document.getElementById('overlay');
+          ov.classList.add('fade-out');
+          setTimeout(() => ov.remove(), 700);
+        }, 300);
+      })
+      .catch(err => {
+        document.getElementById('overlay-status').textContent = '\u26a0 Failed: ' + err.message;
+      });
+  }
+  fetchFields();
 
-  // ── Stats ──
   function computeStats() {
     const yields = allFields.filter(f => f.predicted_yield_kg_ha != null).map(f => f.predicted_yield_kg_ha);
     if (!yields.length) return;
@@ -631,7 +620,6 @@ async def map_ui():
     driftEl.className = 'stat-val ' + (driftCount > 5 ? 'red' : driftCount > 0 ? 'yellow' : 'green');
   }
 
-  // ── Build markers ──
   function buildMarkers() {
     markers.forEach(m => map.removeLayer(m.layer));
     markers = [];
@@ -648,7 +636,6 @@ async def map_ui():
     });
   }
 
-  // ── Legend ──
   function updateLegend() {
     const title = document.getElementById('legend-title');
     const body  = document.getElementById('legend-body');
@@ -661,38 +648,29 @@ async def map_ui():
       body.innerHTML = crops.map(c => `<div class="leg-row"><div class="leg-dot" style="background:${cropColor(c)}"></div>${CROP_LABELS[c] || c}</div>`).join('');
     } else {
       title.textContent = 'Drift level';
-      body.innerHTML = [
-        ['#4ade80','No drift'],['#facc15','Low drift'],['#f87171','High drift']
-      ].map(([c,l]) => `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${l}</div>`).join('');
+      body.innerHTML = [['#4ade80','No drift'],['#facc15','Low drift'],['#f87171','High drift']]
+        .map(([c,l]) => `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${l}</div>`).join('');
     }
   }
 
-  // ── Filters ──
   document.querySelectorAll('[data-crop]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('[data-crop]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeCrop = btn.dataset.crop;
-      buildMarkers();
+      btn.classList.add('active'); activeCrop = btn.dataset.crop; buildMarkers();
     });
   });
   document.querySelectorAll('[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeView = btn.dataset.view;
-      buildMarkers();
-      updateLegend();
+      btn.classList.add('active'); activeView = btn.dataset.view; buildMarkers(); updateLegend();
     });
   });
 
-  // ── Helpers ──
   function fmt(val, decimals, suffix) {
     if (val == null) return '\u2014';
     return Number(val).toFixed(decimals) + suffix;
   }
 
-  // ── Panel ──
   function renderYield(f) {
     const y = f.predicted_yield_kg_ha;
     const color = y != null ? markerColor(f, 'yield', minYield, maxYield) : '#94a3b8';
@@ -700,8 +678,7 @@ async def map_ui():
     document.getElementById('p-yield').textContent = y != null ? y.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
     document.getElementById('p-yield').style.color = color;
     document.getElementById('p-ci').textContent = f.lower_bound != null
-      ? `80% CI: ${f.lower_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} \u2013 ${f.upper_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg/ha`
-      : '';
+      ? `80% CI: ${f.lower_bound.toLocaleString(undefined,{maximumFractionDigits:0})} \u2013 ${f.upper_bound.toLocaleString(undefined,{maximumFractionDigits:0})} kg/ha` : '';
     const bar = document.getElementById('p-bar');
     bar.style.background = color;
     setTimeout(() => { bar.style.width = pct + '%'; }, 50);
@@ -714,7 +691,6 @@ async def map_ui():
   }
 
   function openPanel(f) {
-    activeField = f;
     document.getElementById('p-id').textContent = f.field_id;
     document.getElementById('p-name').textContent = f.name || f.field_id;
     document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type] || f.crop_type).replace(/_/g, ' ');
@@ -723,14 +699,8 @@ async def map_ui():
     document.getElementById('p-coords').textContent = f.lat.toFixed(3) + ', ' + f.lon.toFixed(3);
     const soil = (f.soil_type || '').replace(/_/g, ' ');
     document.getElementById('p-soil').innerHTML = soil ? `<span class="soil-badge">${soil}</span>` : '\u2014';
-
-    // Render yield — use bulk data immediately if available
     renderYield(f);
-
-    // Render weather from bulk data immediately (already have it from /fields)
     renderWeather(f);
-
-    // Badges
     const driftClass = f.drift_level === 'high' ? 'badge-drift-high' : f.drift_level === 'low' ? 'badge-drift-low' : 'badge-drift-none';
     const driftIcon  = f.drift_level === 'high' ? '\u26a0\ufe0f' : f.drift_level === 'low' ? '\u25b3' : '\u2713';
     const driftLabel = f.drift_warning ? `Drift: ${f.drift_level}` : 'No drift';
@@ -738,7 +708,6 @@ async def map_ui():
     if (f.stale_features) badges += `<span class="badge badge-stale">\u23f0 Stale data</span>`;
     badges += `<span class="badge badge-model">\u2b22 ${document.getElementById('s-model').textContent}</span>`;
     document.getElementById('panel-badges').innerHTML = badges;
-
     document.getElementById('panel').classList.add('open');
     map.panTo([f.lat, f.lon], { animate: true, duration: 0.4 });
   }
@@ -747,7 +716,6 @@ async def map_ui():
     document.getElementById('panel').classList.remove('open');
     document.getElementById('p-bar').style.width = '0%';
   };
-
   map.on('click', () => closePanel());
 })();
 </script>
@@ -769,7 +737,7 @@ def health() -> dict:
 @app.post("/predict")
 async def predict(request: PredictRequest) -> dict:
     if not model_module.is_loaded():
-        raise HTTPException(status_code=503, detail="No model available.")
+        raise HTTPException(status_code=503, detail="Model not loaded yet — please retry in a moment.")
 
     start = time.time()
     field_meta = get_field_meta(request.field_id)
