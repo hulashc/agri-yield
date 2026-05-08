@@ -29,6 +29,7 @@ from serving.metrics import metrics_router
 import serving.model as model_module
 from serving.model import load_model
 from serving.schemas import PredictRequest
+from serving.version import BUILD_VERSION
 
 log = logging.getLogger(__name__)
 
@@ -728,6 +729,7 @@ async def map_ui():
 def health() -> dict:
     return {
         "status": "ok",
+        "build_version": BUILD_VERSION,
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
         "fields_loaded": not _FIELDS_DF.empty,
