@@ -113,6 +113,9 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "drift_warning": drift_result["drift_warning"],
                 "drift_level": drift_result["drift_level"],
                 "stale_features": live.get("stale_features", False),
+                "temp_c": live.get("t2m_max_today"),
+                "rainfall_mm": live.get("rainfall_today_mm"),
+                "solar_rad_mj_m2": live.get("solar_radiation_today"),
                 "error": None,
             }
         except Exception as exc:
@@ -132,6 +135,9 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "drift_warning": False,
                 "drift_level": "none",
                 "stale_features": False,
+                "temp_c": None,
+                "rainfall_mm": None,
+                "solar_rad_mj_m2": None,
                 "error": str(exc),
             }
 
@@ -425,11 +431,11 @@ async def map_ui():
       </div>
     </div>
     <div id="stats-strip">
-      <div class="stat"><span class="stat-val" id="s-fields">—</span><span class="stat-lbl">Fields</span></div>
-      <div class="stat"><span class="stat-val green" id="s-avg">—</span><span class="stat-lbl">Avg yield kg/ha</span></div>
-      <div class="stat"><span class="stat-val green" id="s-best-val">—</span><span class="stat-lbl" id="s-best-lbl">Top field</span></div>
-      <div class="stat"><span class="stat-val red" id="s-drift">—</span><span class="stat-lbl">Drift warnings</span></div>
-      <div class="stat"><span class="stat-val" id="s-model">—</span><span class="stat-lbl">Model</span></div>
+      <div class="stat"><span class="stat-val" id="s-fields">&#x2014;</span><span class="stat-lbl">Fields</span></div>
+      <div class="stat"><span class="stat-val green" id="s-avg">&#x2014;</span><span class="stat-lbl">Avg yield kg/ha</span></div>
+      <div class="stat"><span class="stat-val green" id="s-best-val">&#x2014;</span><span class="stat-lbl" id="s-best-lbl">Top field</span></div>
+      <div class="stat"><span class="stat-val red" id="s-drift">&#x2014;</span><span class="stat-lbl">Drift warnings</span></div>
+      <div class="stat"><span class="stat-val" id="s-model">&#x2014;</span><span class="stat-lbl">Model</span></div>
     </div>
     <div class="live-pill"><div class="live-dot"></div>Live</div>
   </header>
@@ -454,30 +460,30 @@ async def map_ui():
     <div id="panel">
       <div class="panel-header">
         <div>
-          <div class="p-field-id" id="p-id">—</div>
-          <div class="p-name"    id="p-name">—</div>
-          <div class="p-crop-tag" id="p-crop">—</div>
+          <div class="p-field-id" id="p-id">&#x2014;</div>
+          <div class="p-name"    id="p-name">&#x2014;</div>
+          <div class="p-crop-tag" id="p-crop">&#x2014;</div>
         </div>
-        <button class="panel-close" onclick="closePanel()" aria-label="Close panel">✕</button>
+        <button class="panel-close" onclick="closePanel()" aria-label="Close panel">&#x2715;</button>
       </div>
       <div class="panel-meta">
-        <div class="meta-cell"><span class="meta-lbl">Region</span><span class="meta-val" id="p-region">—</span></div>
-        <div class="meta-cell"><span class="meta-lbl">Area</span><span class="meta-val" id="p-area">—</span></div>
-        <div class="meta-cell"><span class="meta-lbl">Coordinates</span><span class="meta-val" id="p-coords">—</span></div>
-        <div class="meta-cell"><span class="meta-lbl">Soil Type</span><span class="meta-val" id="p-soil">—</span></div>
+        <div class="meta-cell"><span class="meta-lbl">Region</span><span class="meta-val" id="p-region">&#x2014;</span></div>
+        <div class="meta-cell"><span class="meta-lbl">Area</span><span class="meta-val" id="p-area">&#x2014;</span></div>
+        <div class="meta-cell"><span class="meta-lbl">Coordinates</span><span class="meta-val" id="p-coords">&#x2014;</span></div>
+        <div class="meta-cell"><span class="meta-lbl">Soil Type</span><span class="meta-val" id="p-soil">&#x2014;</span></div>
       </div>
       <div id="panel-yield">
         <div class="yield-main">
-          <div class="yield-num" id="p-yield">—</div>
+          <div class="yield-num" id="p-yield">&#x2014;</div>
           <div class="yield-unit">kg / ha</div>
         </div>
-        <div class="yield-ci" id="p-ci">—</div>
+        <div class="yield-ci" id="p-ci">&#x2014;</div>
         <div class="yield-bar-track"><div class="yield-bar-fill" id="p-bar" style="width:0%"></div></div>
       </div>
       <div id="panel-weather">
-        <div class="wx-cell"><div class="wx-icon">&#127777;</div><div class="wx-val" id="wx-temp">—</div><div class="wx-lbl">Temperature</div></div>
-        <div class="wx-cell"><div class="wx-icon">&#127783;</div><div class="wx-val" id="wx-rain">—</div><div class="wx-lbl">Precipitation</div></div>
-        <div class="wx-cell"><div class="wx-icon">&#9728;</div><div class="wx-val" id="wx-rad">—</div><div class="wx-lbl">Solar Rad.</div></div>
+        <div class="wx-cell"><div class="wx-icon">&#127777;</div><div class="wx-val" id="wx-temp">&#x2014;</div><div class="wx-lbl">Live Temperature</div></div>
+        <div class="wx-cell"><div class="wx-icon">&#127783;</div><div class="wx-val" id="wx-rain">&#x2014;</div><div class="wx-lbl">Live Precipitation</div></div>
+        <div class="wx-cell"><div class="wx-icon">&#9728;</div><div class="wx-val" id="wx-rad">&#x2014;</div><div class="wx-lbl">Live Solar Rad.</div></div>
       </div>
       <div id="panel-badges"></div>
     </div>
@@ -502,7 +508,7 @@ async def map_ui():
           <path d="M20 20L25 15" stroke="#14532d" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         <div class="overlay-title">Agri Yield Intelligence</div>
-        <div class="overlay-sub" id="overlay-status">Connecting to model\u2026</div>
+        <div class="overlay-sub" id="overlay-status">Connecting to model&#x2026;</div>
         <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
       </div>
     </div>
@@ -530,7 +536,6 @@ async def map_ui():
   };
   function cropColor(c) { return CROP_COLORS[c] || '#94a3b8'; }
   function lerpColor(t) {
-    // red → yellow → green gradient for yield
     if (t < 0.5) {
       const r = 248, g = Math.round(113 + (204 - 113) * (t / 0.5)), b = 113;
       return `rgb(${r},${g},${b})`;
@@ -681,61 +686,58 @@ async def map_ui():
     });
   });
 
-  // ── Panel ──
-  function openPanel(f) {
-    activeField = f;
-    document.getElementById('p-id').textContent = f.field_id;
-    document.getElementById('p-name').textContent = f.name || f.field_id;
-    document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type] || f.crop_type).replace(/_/g,' ');
-    document.getElementById('p-region').textContent = f.region || '\u2014';
-    document.getElementById('p-area').textContent = f.area_ha + ' ha';
-    document.getElementById('p-coords').textContent = f.lat.toFixed(3) + ', ' + f.lon.toFixed(3);
-    const soil = (f.soil_type || '').replace(/_/g,' ');
-    document.getElementById('p-soil').innerHTML = soil ? `<span class="soil-badge">${soil}</span>` : '\u2014';
+  // ── Helpers ──
+  function fmt(val, decimals, suffix) {
+    if (val == null) return '\u2014';
+    return Number(val).toFixed(decimals) + suffix;
+  }
 
-    // Yield
+  // ── Panel ──
+  function renderYield(f) {
     const y = f.predicted_yield_kg_ha;
     const color = y != null ? markerColor(f, 'yield', minYield, maxYield) : '#94a3b8';
     const pct = y != null ? Math.max(4, Math.round(((y - minYield) / Math.max(maxYield - minYield, 1)) * 100)) : 0;
-    document.getElementById('p-yield').textContent = y != null ? y.toLocaleString(undefined,{maximumFractionDigits:0}) : '\u2014';
+    document.getElementById('p-yield').textContent = y != null ? y.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
     document.getElementById('p-yield').style.color = color;
     document.getElementById('p-ci').textContent = f.lower_bound != null
-      ? `80% CI: ${f.lower_bound.toLocaleString(undefined,{maximumFractionDigits:0})} \u2013 ${f.upper_bound.toLocaleString(undefined,{maximumFractionDigits:0})} kg/ha`
+      ? `80% CI: ${f.lower_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} \u2013 ${f.upper_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg/ha`
       : '';
     const bar = document.getElementById('p-bar');
     bar.style.background = color;
     setTimeout(() => { bar.style.width = pct + '%'; }, 50);
+  }
 
-    // Weather placeholders
-    document.getElementById('wx-temp').textContent = '\u2014';
-    document.getElementById('wx-rain').textContent = '\u2014';
-    document.getElementById('wx-rad').textContent  = '\u2014';
+  function renderWeather(f) {
+    document.getElementById('wx-temp').textContent = fmt(f.temp_c, 1, '\u00b0C');
+    document.getElementById('wx-rain').textContent = fmt(f.rainfall_mm, 1, ' mm');
+    document.getElementById('wx-rad').textContent  = fmt(f.solar_rad_mj_m2, 1, ' MJ/m\u00b2');
+  }
+
+  function openPanel(f) {
+    activeField = f;
+    document.getElementById('p-id').textContent = f.field_id;
+    document.getElementById('p-name').textContent = f.name || f.field_id;
+    document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type] || f.crop_type).replace(/_/g, ' ');
+    document.getElementById('p-region').textContent = f.region || '\u2014';
+    document.getElementById('p-area').textContent = f.area_ha + ' ha';
+    document.getElementById('p-coords').textContent = f.lat.toFixed(3) + ', ' + f.lon.toFixed(3);
+    const soil = (f.soil_type || '').replace(/_/g, ' ');
+    document.getElementById('p-soil').innerHTML = soil ? `<span class="soil-badge">${soil}</span>` : '\u2014';
+
+    // Render yield — use bulk data immediately if available
+    renderYield(f);
+
+    // Render weather from bulk data immediately (already have it from /fields)
+    renderWeather(f);
 
     // Badges
     const driftClass = f.drift_level === 'high' ? 'badge-drift-high' : f.drift_level === 'low' ? 'badge-drift-low' : 'badge-drift-none';
     const driftIcon  = f.drift_level === 'high' ? '\u26a0\ufe0f' : f.drift_level === 'low' ? '\u25b3' : '\u2713';
     const driftLabel = f.drift_warning ? `Drift: ${f.drift_level}` : 'No drift';
     let badges = `<span class="badge ${driftClass}">${driftIcon} ${driftLabel}</span>`;
-    if (f.stale_features) badges += `<span class="badge badge-stale">\u23f0 Stale features</span>`;
+    if (f.stale_features) badges += `<span class="badge badge-stale">\u23f0 Stale data</span>`;
     badges += `<span class="badge badge-model">\u2b22 ${document.getElementById('s-model').textContent}</span>`;
     document.getElementById('panel-badges').innerHTML = badges;
-
-    // Fetch fresh weather for the wx strip
-    fetch('/predict', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field_id: f.field_id }),
-    }).then(r => r.json()).then(d => {
-      if (d.stale_features) {
-        document.getElementById('wx-temp').textContent = 'Stale';
-        document.getElementById('wx-rain').textContent = 'Stale';
-        document.getElementById('wx-rad').textContent  = 'Stale';
-      } else {
-        document.getElementById('wx-temp').textContent = 'Live';
-        document.getElementById('wx-rain').textContent = 'Live';
-        document.getElementById('wx-rad').textContent  = 'Live';
-      }
-    }).catch(() => {});
 
     document.getElementById('panel').classList.add('open');
     map.panTo([f.lat, f.lon], { animate: true, duration: 0.4 });
@@ -746,11 +748,7 @@ async def map_ui():
     document.getElementById('p-bar').style.width = '0%';
   };
 
-  // Close panel on map click
-  map.on('click', (e) => {
-    if (!e.originalEvent.target.closest) return;
-    closePanel();
-  });
+  map.on('click', () => closePanel());
 })();
 </script>
 </body>
@@ -815,6 +813,9 @@ async def predict(request: PredictRequest) -> dict:
         "drift_level": drift_result["drift_level"],
         "psi_score": drift_result["max_psi"],
         "stale_features": live.get("stale_features", False),
+        "temp_c": live.get("t2m_max_today"),
+        "rainfall_mm": live.get("rainfall_today_mm"),
+        "solar_rad_mj_m2": live.get("solar_radiation_today"),
         "model_version": model_module.model_version(),
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
