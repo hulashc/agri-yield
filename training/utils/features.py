@@ -4,6 +4,7 @@ NON_FEATURE_COLS = ["yield_kg_per_ha", "week_start", "field_id"]
 
 # Static feature column list used by serving/model.py at prediction time.
 # Must match the columns produced by the training pipeline.
+# v2: explicit export — cache-bust to ensure Render rebuilds cleanly.
 FEATURE_COLS = [
     "lat",
     "lon",
