@@ -7,6 +7,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/agri-yield
 
 jobs:
   train-build-deploy:
@@ -64,8 +66,15 @@ jobs:
           file: Dockerfile.prod
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/agri-yield:latest
-            ghcr.io/${{ github.repository_owner }}/agri-yield:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Force-retag latest in registry
+        run: |
+          docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker tag  ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest
+          echo "Retagged ${{ github.sha }} as latest"
 
       - name: Trigger Render deploy
         if: env.RENDER_DEPLOY_HOOK != ''
