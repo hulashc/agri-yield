@@ -1,70 +1,97 @@
 """
-Synthetic training data generator.
-Produces weekly field-level features for all fields in uk_fields.csv.
+Generate synthetic UK agricultural training data.
+Outputs data/features/weekly_field_features.parquet with columns
+that exactly match FEATURE_COLS in training/utils/features.py.
 """
 
 import os
-
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
 
-np.random.seed(42)
+RANDOM_SEED = 42
+N_FIELDS = 100
+N_WEEKS = 52
+OUTPUT_PATH = "data/features/weekly_field_features.parquet"
 
-fields = pd.read_csv("data/seed/uk_fields.csv")
-records = []
+CROP_TYPES = ["winter_wheat", "spring_wheat", "winter_barley", "spring_barley", "oilseed_rape", "sugar_beet"]
+SOIL_TYPES = ["clay", "sandy_loam", "silt", "loam", "peat"]
+REGIONS = ["East Anglia", "Yorkshire", "Midlands", "South West", "North West", "Scotland", "Wales", "Northumberland"]
 
-crop_yield_map = {
-    "winter_wheat": (8000, 1200),
-    "oilseed_rape": (3800, 600),
-    "sugar_beet": (70000, 8000),
-    "winter_barley": (6500, 900),
-    "spring_barley": (5500, 800),
-    "spring_wheat": (7000, 1000),
+# Base yields per crop type (kg/ha)
+CROP_BASE_YIELD = {
+    "winter_wheat": 8000, "spring_wheat": 6500,
+    "winter_barley": 7000, "spring_barley": 5800,
+    "oilseed_rape": 3500, "sugar_beet": 70000,
 }
 
-weeks = pd.date_range("2020-01-06", "2024-12-30", freq="W-MON")
+def generate():
+    rng = np.random.default_rng(RANDOM_SEED)
 
-for _, field in fields.iterrows():
-    mean_y, std_y = crop_yield_map.get(field["crop_type"], (6000, 1000))
-    for week in weeks:
-        d = week.day_of_year
-        records.append(
-            {
-                "field_id": field["field_id"],
-                "week_start": week,
-                "crop_type": field["crop_type"],
-                "soil_temp_mean": 12
-                + 10 * np.sin(2 * np.pi * (d - 80) / 365)
-                + np.random.normal(0, 1.5),
-                "soil_temp_std": abs(np.random.normal(2, 0.5)),
-                "moisture_mean": 55
-                + 15 * np.sin(2 * np.pi * (d + 90) / 365)
-                + np.random.normal(0, 5),
-                "moisture_std": abs(np.random.normal(8, 2)),
-                "ph_mean": np.random.normal(6.5, 0.3),
-                "nitrogen_mean": np.random.normal(85, 15),
-                "phosphorus_mean": np.random.normal(28, 6),
-                "potassium_mean": np.random.normal(125, 20),
-                "air_temp_mean": 10
-                + 8 * np.sin(2 * np.pi * (d - 80) / 365)
-                + np.random.normal(0, 2),
-                "precip_total": abs(np.random.normal(15, 8)),
-                "humidity_mean": np.random.normal(75, 10),
-                "wind_speed_mean": abs(np.random.normal(5, 2)),
-                "latest_ndvi": 0.3
-                + 0.4 * np.sin(2 * np.pi * (d - 60) / 365)
-                + np.random.normal(0, 0.05),
-                "cloud_cover_pct": abs(np.random.normal(60, 20)),
-                "ndvi_interpolated": int(np.random.choice([0, 1], p=[0.8, 0.2])),
-                "ndvi_proxied": int(np.random.choice([0, 1], p=[0.9, 0.1])),
-                "yield_kg_per_ha": max(0, np.random.normal(mean_y, std_y)),
-            }
-        )
+    crop_enc   = {c: i for i, c in enumerate(CROP_TYPES)}
+    soil_enc   = {s: i for i, s in enumerate(SOIL_TYPES)}
+    region_enc = {r: i for i, r in enumerate(REGIONS)}
 
-df = pd.DataFrame(records)
-df["crop_type"] = LabelEncoder().fit_transform(df["crop_type"])
-os.makedirs("data/features", exist_ok=True)
-df.to_parquet("data/features/weekly_field_features.parquet", index=False)
-print(f"Generated {len(df)} rows across {df['field_id'].nunique()} fields")
-print(f"Date range: {df['week_start'].min()} to {df['week_start'].max()}")
+    # Field-level static attributes
+    field_ids   = [f"F{i:03d}" for i in range(N_FIELDS)]
+    field_lats  = rng.uniform(50.5, 58.5, N_FIELDS)   # UK lat range
+    field_lons  = rng.uniform(-4.5, 1.8, N_FIELDS)    # UK lon range
+    field_areas = rng.uniform(10, 150, N_FIELDS)       # ha
+    field_crops = rng.choice(CROP_TYPES, N_FIELDS)
+    field_soils = rng.choice(SOIL_TYPES, N_FIELDS)
+    field_regs  = rng.choice(REGIONS, N_FIELDS)
+
+    rows = []
+    for i, fid in enumerate(field_ids):
+        crop   = field_crops[i]
+        base_y = CROP_BASE_YIELD[crop]
+        for week in range(N_WEEKS):
+            week_of_year = week + 1
+            year = 2024
+
+            # Seasonal weather patterns
+            season_factor = np.sin(np.pi * week / 52)  # peaks mid-year
+            temp   = 8 + 12 * season_factor + rng.normal(0, 2)
+            precip = max(0, 3 + 2 * (1 - season_factor) + rng.normal(0, 1.5))
+            solar  = max(0, 8 + 14 * season_factor + rng.normal(0, 2))
+            et0    = max(0, 1.5 + 3 * season_factor + rng.normal(0, 0.5))
+            sm     = max(0, min(1, 0.35 - 0.1 * season_factor + rng.normal(0, 0.05)))
+            ndvi   = max(0, min(1, 0.3 + 0.5 * season_factor + rng.normal(0, 0.05)))
+
+            # Yield driven by weather + crop type
+            yield_val = (
+                base_y
+                * (0.8 + 0.4 * ndvi)
+                * (0.9 + 0.1 * sm)
+                * (1 + 0.005 * temp)
+                + rng.normal(0, base_y * 0.05)
+            )
+
+            rows.append({
+                "field_id":               fid,
+                "week_of_year":           week_of_year,
+                "year":                   year,
+                "lat":                    round(float(field_lats[i]), 4),
+                "lon":                    round(float(field_lons[i]), 4),
+                "area_ha":                round(float(field_areas[i]), 1),
+                "crop_type_encoded":      crop_enc[crop],
+                "soil_type_encoded":      soil_enc[field_soils[i]],
+                "region_encoded":         region_enc[field_regs[i]],
+                "temperature_2m_mean":    round(temp, 2),
+                "precipitation_sum":      round(precip, 2),
+                "shortwave_radiation_sum": round(solar, 2),
+                "et0_fao_evapotranspiration": round(et0, 3),
+                "soil_moisture":          round(sm, 4),
+                "ndvi":                   round(ndvi, 4),
+                "yield_kg_per_ha":        round(max(0, yield_val), 1),
+            })
+
+    df = pd.DataFrame(rows)
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    df.to_parquet(OUTPUT_PATH, index=False)
+    print(f"Generated {len(df)} rows → {OUTPUT_PATH}")
+    print(f"Columns: {list(df.columns)}")
+    return df
+
+
+if __name__ == "__main__":
+    generate()

@@ -1,13 +1,13 @@
 """
-CI training script — fully self-contained, no local package imports.
+CI training script.
 Trains XGBoost on synthetic data and saves model.pkl to repo root.
+Uses the canonical FEATURE_COLS from training.utils.features.
 """
 
 import os
 import pickle
 import sys
 
-# Make sure repo root is on path so training.utils can be found
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
@@ -15,27 +15,10 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 
+from training.utils.features import FEATURE_COLS
+
 TARGET = "yield_kg_per_ha"
 OUTPUT_PATH = "model.pkl"
-
-FEATURE_COLS = [
-    "soil_temp_mean",
-    "soil_temp_std",
-    "moisture_mean",
-    "moisture_std",
-    "ph_mean",
-    "nitrogen_mean",
-    "phosphorus_mean",
-    "potassium_mean",
-    "air_temp_mean",
-    "precip_total",
-    "humidity_mean",
-    "wind_speed_mean",
-    "latest_ndvi",
-    "cloud_cover_pct",
-    "ndvi_interpolated",
-    "ndvi_proxied",
-]
 
 
 def train_and_export(
@@ -44,11 +27,11 @@ def train_and_export(
     print(f"Loading dataset from {dataset_path}...")
     df = pd.read_parquet(dataset_path)
     df = df.dropna(subset=[TARGET])
-    print(f"Loaded {len(df)} rows")
+    print(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
 
-    # Fill any missing feature cols with 0
     for col in FEATURE_COLS:
         if col not in df.columns:
+            print(f"  [warn] missing column '{col}' — filling with 0")
             df[col] = 0
 
     X = df[FEATURE_COLS]

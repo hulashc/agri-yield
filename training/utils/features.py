@@ -2,22 +2,22 @@ import pandas as pd
 
 NON_FEATURE_COLS = ["yield_kg_per_ha", "week_start", "field_id"]
 
-# Static feature column list used by serving/model.py at prediction time.
-# Must match the columns produced by the training pipeline.
-# v2: explicit export — cache-bust to ensure Render rebuilds cleanly.
+# Single source of truth for feature columns.
+# Used by BOTH train_and_export.py (training) and serving/model.py (prediction).
+# Must match the columns produced by generate_data.py.
 FEATURE_COLS = [
     "lat",
     "lon",
     "area_ha",
+    "crop_type_encoded",
+    "soil_type_encoded",
+    "region_encoded",
     "temperature_2m_mean",
     "precipitation_sum",
     "shortwave_radiation_sum",
     "et0_fao_evapotranspiration",
     "soil_moisture",
     "ndvi",
-    "crop_type_encoded",
-    "soil_type_encoded",
-    "region_encoded",
     "week_of_year",
     "year",
 ]
