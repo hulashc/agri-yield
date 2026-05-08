@@ -1,177 +1,480 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UK Field Yield Forecast</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
-        #header { padding: 16px 24px; background: #1a1d27; border-bottom: 1px solid #2a2d3a; display: flex; align-items: center; gap: 12px; }
-        #header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; }
-        #header span { font-size: 0.8rem; color: #6b7280; }
-        #map { height: calc(100vh - 57px); width: 100%; }
-        .leaflet-popup-content-wrapper { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; color: #e0e0e0; }
-        .leaflet-popup-tip { background: #1a1d27; }
-        .popup-field-name { font-size: 1rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
-        .popup-yield { font-size: 1.8rem; font-weight: 800; color: #22c55e; }
-        .popup-unit { font-size: 0.8rem; color: #9ca3af; margin-bottom: 4px; }
-        .popup-ci { font-size: 0.85rem; color: #9ca3af; margin-bottom: 10px; }
-        .popup-badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; }
-        .badge-green { background: #14532d; color: #4ade80; }
-        .badge-amber { background: #451a03; color: #fb923c; }
-        .badge-red { background: #450a0a; color: #f87171; }
-        .popup-meta { font-size: 0.75rem; color: #6b7280; margin-top: 8px; }
-        .loading-ring { border: 3px solid #2a2d3a; border-top-color: #22c55e; border-radius: 50%; width: 20px; height: 20px; animation: spin 0.8s linear infinite; display: inline-block; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .leaflet-tooltip { background: transparent; border: none; box-shadow: none; color: #94a3b8; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UK Field Yield Forecast</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg:     #161616;
+      --fg:     #DADADA;
+      --border: #DADADA;
+      --muted:  rgba(218,218,218,0.35);
+      --faint:  rgba(218,218,218,0.12);
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── HEADER ─────────────────────────────────────── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 52px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    #header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    #header h1 {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      color: var(--fg);
+      white-space: nowrap;
+    }
+
+    .h-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      opacity: 0.3;
+    }
+
+    #header-hint {
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    #header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--fg);
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.2; }
+    }
+
+    #api-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── MAP ─────────────────────────────────────────── */
+    #map {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+    }
+
+    /* ── LEAFLET OVERRIDES ───────────────────────────── */
+    .leaflet-popup-content-wrapper {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      color: var(--fg);
+      box-shadow: 4px 4px 0 var(--border);
+      padding: 0;
+    }
+
+    .leaflet-popup-content { margin: 0; padding: 0; }
+    .leaflet-popup-tip-container { display: none; }
+
+    .leaflet-popup-close-button {
+      color: var(--muted) !important;
+      font-size: 1rem !important;
+      top: 10px !important;
+      right: 10px !important;
+    }
+    .leaflet-popup-close-button:hover { color: var(--fg) !important; }
+
+    .leaflet-control-zoom a {
+      background: var(--bg) !important;
+      color: var(--fg) !important;
+      border-color: var(--border) !important;
+      border-radius: 0 !important;
+    }
+    .leaflet-control-zoom a:hover { background: var(--faint) !important; }
+
+    .leaflet-control-attribution {
+      background: var(--bg) !important;
+      color: var(--muted) !important;
+      font-size: 0.55rem !important;
+    }
+    .leaflet-control-attribution a { color: var(--muted) !important; }
+
+    .leaflet-tooltip {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: var(--muted);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.58rem;
+      font-weight: 500;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 0;
+    }
+
+    /* ── POPUP CONTENT ───────────────────────────────── */
+    .popup-wrap { width: 220px; padding: 16px; }
+
+    .popup-tag {
+      font-size: 0.55rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+
+    .popup-field-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: var(--fg);
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+
+    .popup-divider {
+      height: 1px;
+      background: var(--border);
+      opacity: 0.2;
+      margin-bottom: 12px;
+    }
+
+    .popup-yield {
+      font-size: 2.1rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--fg);
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .popup-unit {
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .popup-ci {
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .popup-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      font-size: 0.58rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border: 1px solid var(--fg);
+      color: var(--fg);
+      margin-bottom: 12px;
+    }
+    .popup-badge.badge-amber {
+      border-color: var(--muted);
+      color: var(--muted);
+    }
+    .popup-badge.badge-red {
+      border-color: rgba(218,218,218,0.4);
+      color: rgba(218,218,218,0.4);
+    }
+
+    .popup-meta {
+      font-size: 0.6rem;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .popup-stale {
+      font-size: 0.6rem;
+      color: rgba(218,218,218,0.4);
+      margin-top: 4px;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── LOADING ─────────────────────────────────────── */
+    .loading-wrap {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 4px 0 10px;
+      color: var(--muted);
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .loading-ring {
+      width: 13px;
+      height: 13px;
+      border: 1.5px solid var(--faint);
+      border-top-color: var(--fg);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ERROR ───────────────────────────────────────── */
+    .popup-error {
+      font-size: 0.7rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+  </style>
 </head>
 
 <body>
-    <div id="header">
-        <h1>🌾 UK Field Yield Forecast</h1>
-        <span>Click a field marker to get this season's yield prediction</span>
+  <header id="header">
+    <div id="header-left">
+      <a id="logo" href="#" aria-label="UK Field Yield Forecast">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="1" y="1" width="20" height="20" stroke="#DADADA" stroke-width="1.2"/>
+          <line x1="11" y1="18" x2="11" y2="4" stroke="#DADADA" stroke-width="1"/>
+          <path d="M11 10 C8 10 6 8.5 6 6.5 C8 6.5 10 7.5 11 10Z" fill="#DADADA"/>
+          <path d="M11 10 C14 10 16 8.5 16 6.5 C14 6.5 12 7.5 11 10Z" fill="#DADADA"/>
+          <path d="M11 14 C9 14 7.5 12.8 7.5 11.2 C9 11.2 10.5 12 11 14Z" fill="#DADADA"/>
+          <path d="M11 14 C13 14 14.5 12.8 14.5 11.2 C13 11.2 11.5 12 11 14Z" fill="#DADADA"/>
+        </svg>
+      </a>
+      <h1>UK Field Yield Forecast</h1>
+      <div class="h-divider"></div>
+      <span id="header-hint">Select a field marker to predict yield</span>
     </div>
-    <div id="map"></div>
+    <div id="header-right">
+      <div id="status-dot"></div>
+      <span id="api-label">Live API</span>
+    </div>
+  </header>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const API_BASE = "http://localhost:8000";
+  <div id="map"></div>
 
-        const FIELDS = [
-            { id: "F001", name: "Bicker Fen", lat: 52.9135, lon: -0.1736, crop: "Winter Wheat", region: "Lincolnshire" },
-            { id: "F002", name: "Holbeach St Marks", lat: 52.8389, lon: -0.0325, crop: "Oilseed Rape", region: "Lincolnshire" },
-            { id: "F003", name: "Spalding East", lat: 52.7862, lon: -0.1532, crop: "Sugar Beet", region: "Lincolnshire" },
-            { id: "F004", name: "Wisbech North", lat: 52.6793, lon: 0.1631, crop: "Winter Barley", region: "Cambridgeshire" },
-            { id: "F005", name: "Boston West", lat: 52.9721, lon: -0.0812, crop: "Winter Wheat", region: "Lincolnshire" },
-            { id: "F006", name: "Kings Lynn South", lat: 52.7156, lon: 0.3928, crop: "Oilseed Rape", region: "Norfolk" },
-            { id: "F007", name: "Downham Market", lat: 52.6009, lon: 0.3811, crop: "Sugar Beet", region: "Norfolk" },
-            { id: "F008", name: "Ely Central", lat: 52.3983, lon: 0.2617, crop: "Winter Wheat", region: "Cambridgeshire" },
-            { id: "F009", name: "Thames Valley West", lat: 51.4700, lon: -0.9800, crop: "Winter Wheat", region: "Berkshire" },
-            { id: "F010", name: "Chiltern Hills North", lat: 51.7800, lon: -0.8200, crop: "Oilseed Rape", region: "Oxfordshire" },
-            { id: "F011", name: "Avon Vale", lat: 51.3800, lon: -2.3600, crop: "Winter Barley", region: "Somerset" },
-            { id: "F012", name: "Severn Plain", lat: 51.8500, lon: -2.2400, crop: "Sugar Beet", region: "Gloucestershire" },
-            { id: "F013", name: "Trent Valley", lat: 52.8500, lon: -1.3200, crop: "Winter Wheat", region: "Nottinghamshire" },
-            { id: "F014", name: "Soar Valley", lat: 52.5800, lon: -1.2000, crop: "Oilseed Rape", region: "Leicestershire" },
-            { id: "F015", name: "Peak Fringe", lat: 53.2500, lon: -1.7000, crop: "Winter Barley", region: "Derbyshire" },
-            { id: "F016", name: "Cheshire Plain", lat: 53.1500, lon: -2.5500, crop: "Sugar Beet", region: "Cheshire" },
-            { id: "F017", name: "Mersey Lowlands", lat: 53.3800, lon: -2.7200, crop: "Winter Wheat", region: "Lancashire" },
-            { id: "F018", name: "Vale of York", lat: 53.8800, lon: -1.1500, crop: "Oilseed Rape", region: "Yorkshire" },
-            { id: "F019", name: "Humber Levels", lat: 53.7200, lon: -0.5500, crop: "Winter Wheat", region: "East Yorkshire" },
-            { id: "F020", name: "Tyne Valley", lat: 54.9200, lon: -1.8500, crop: "Winter Barley", region: "Northumberland" },
-            { id: "F021", name: "Eden Valley", lat: 54.6800, lon: -2.7800, crop: "Oilseed Rape", region: "Cumbria" },
-            { id: "F022", name: "Lothian Plain", lat: 55.8800, lon: -3.0000, crop: "Winter Wheat", region: "East Lothian" },
-            { id: "F023", name: "Tayside Lowlands", lat: 56.4500, lon: -3.0200, crop: "Winter Barley", region: "Perthshire" },
-            { id: "F024", name: "Vale of Glamorgan", lat: 51.4200, lon: -3.4500, crop: "Winter Wheat", region: "South Wales" },
-            { id: "F025", name: "Hereford Plain", lat: 52.0500, lon: -2.7200, crop: "Oilseed Rape", region: "Herefordshire" },
-            { id: "F026", name: "Breckland East", lat: 52.4500, lon: 0.7800, crop: "Sugar Beet", region: "Norfolk" },
-            { id: "F027", name: "Suffolk Clay", lat: 52.1000, lon: 1.1500, crop: "Winter Wheat", region: "Suffolk" },
-            { id: "F028", name: "Essex Uplands", lat: 51.8700, lon: 0.5500, crop: "Oilseed Rape", region: "Essex" },
-        ];
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? "http://localhost:8000"
+      : "https://agri-yield-latest.onrender.com";
 
-        const CITIES = [
-            { name: "London", lat: 51.5074, lon: -0.1278 },
-            { name: "Birmingham", lat: 52.4862, lon: -1.8904 },
-            { name: "Manchester", lat: 53.4808, lon: -2.2426 },
-            { name: "Leeds", lat: 53.8008, lon: -1.5491 },
-            { name: "Sheffield", lat: 53.3811, lon: -1.4701 },
-            { name: "Liverpool", lat: 53.4084, lon: -2.9916 },
-            { name: "Bristol", lat: 51.4545, lon: -2.5879 },
-            { name: "Edinburgh", lat: 55.9533, lon: -3.1883 },
-            { name: "Glasgow", lat: 55.8642, lon: -4.2518 },
-            { name: "Cardiff", lat: 51.4816, lon: -3.1791 },
-            { name: "Newcastle", lat: 54.9783, lon: -1.6178 },
-            { name: "Nottingham", lat: 52.9548, lon: -1.1581 },
-            { name: "Leicester", lat: 52.6369, lon: -1.1398 },
-            { name: "Norwich", lat: 52.6309, lon: 1.2974 },
-            { name: "Cambridge", lat: 52.2053, lon: 0.1218 },
-            { name: "Oxford", lat: 51.7520, lon: -1.2577 },
-            { name: "York", lat: 53.9590, lon: -1.0815 },
-            { name: "Lincoln", lat: 53.2307, lon: -0.5406 },
-            { name: "Peterborough", lat: 52.5695, lon: -0.2405 },
-            { name: "Derby", lat: 52.9225, lon: -1.4746 },
-        ];
+    const FIELDS = [
+      { id: "F001", name: "Bicker Fen",           lat: 52.9135, lon: -0.1736, crop: "Winter Wheat",  region: "Lincolnshire" },
+      { id: "F002", name: "Holbeach St Marks",    lat: 52.8389, lon: -0.0325, crop: "Oilseed Rape",  region: "Lincolnshire" },
+      { id: "F003", name: "Spalding East",        lat: 52.7862, lon: -0.1532, crop: "Sugar Beet",    region: "Lincolnshire" },
+      { id: "F004", name: "Wisbech North",        lat: 52.6793, lon:  0.1631, crop: "Winter Barley", region: "Cambridgeshire" },
+      { id: "F005", name: "Boston West",          lat: 52.9721, lon: -0.0812, crop: "Winter Wheat",  region: "Lincolnshire" },
+      { id: "F006", name: "Kings Lynn South",     lat: 52.7156, lon:  0.3928, crop: "Oilseed Rape",  region: "Norfolk" },
+      { id: "F007", name: "Downham Market",       lat: 52.6009, lon:  0.3811, crop: "Sugar Beet",    region: "Norfolk" },
+      { id: "F008", name: "Ely Central",          lat: 52.3983, lon:  0.2617, crop: "Winter Wheat",  region: "Cambridgeshire" },
+      { id: "F009", name: "Thames Valley West",   lat: 51.4700, lon: -0.9800, crop: "Winter Wheat",  region: "Berkshire" },
+      { id: "F010", name: "Chiltern Hills North", lat: 51.7800, lon: -0.8200, crop: "Oilseed Rape",  region: "Oxfordshire" },
+      { id: "F011", name: "Avon Vale",            lat: 51.3800, lon: -2.3600, crop: "Winter Barley", region: "Somerset" },
+      { id: "F012", name: "Severn Plain",         lat: 51.8500, lon: -2.2400, crop: "Sugar Beet",    region: "Gloucestershire" },
+      { id: "F013", name: "Trent Valley",         lat: 52.8500, lon: -1.3200, crop: "Winter Wheat",  region: "Nottinghamshire" },
+      { id: "F014", name: "Soar Valley",          lat: 52.5800, lon: -1.2000, crop: "Oilseed Rape",  region: "Leicestershire" },
+      { id: "F015", name: "Peak Fringe",          lat: 53.2500, lon: -1.7000, crop: "Winter Barley", region: "Derbyshire" },
+      { id: "F016", name: "Cheshire Plain",       lat: 53.1500, lon: -2.5500, crop: "Sugar Beet",    region: "Cheshire" },
+      { id: "F017", name: "Mersey Lowlands",      lat: 53.3800, lon: -2.7200, crop: "Winter Wheat",  region: "Lancashire" },
+      { id: "F018", name: "Vale of York",         lat: 53.8800, lon: -1.1500, crop: "Oilseed Rape",  region: "Yorkshire" },
+      { id: "F019", name: "Humber Levels",        lat: 53.7200, lon: -0.5500, crop: "Winter Wheat",  region: "East Yorkshire" },
+      { id: "F020", name: "Tyne Valley",          lat: 54.9200, lon: -1.8500, crop: "Winter Barley", region: "Northumberland" },
+      { id: "F021", name: "Eden Valley",          lat: 54.6800, lon: -2.7800, crop: "Oilseed Rape",  region: "Cumbria" },
+      { id: "F022", name: "Lothian Plain",        lat: 55.8800, lon: -3.0000, crop: "Winter Wheat",  region: "East Lothian" },
+      { id: "F023", name: "Tayside Lowlands",     lat: 56.4500, lon: -3.0200, crop: "Winter Barley", region: "Perthshire" },
+      { id: "F024", name: "Vale of Glamorgan",    lat: 51.4200, lon: -3.4500, crop: "Winter Wheat",  region: "South Wales" },
+      { id: "F025", name: "Hereford Plain",       lat: 52.0500, lon: -2.7200, crop: "Oilseed Rape",  region: "Herefordshire" },
+      { id: "F026", name: "Breckland East",       lat: 52.4500, lon:  0.7800, crop: "Sugar Beet",    region: "Norfolk" },
+      { id: "F027", name: "Suffolk Clay",         lat: 52.1000, lon:  1.1500, crop: "Winter Wheat",  region: "Suffolk" },
+      { id: "F028", name: "Essex Uplands",        lat: 51.8700, lon:  0.5500, crop: "Oilseed Rape",  region: "Essex" },
+    ];
 
-        const map = L.map("map").setView([53.5, -2.0], 6);
+    const CITIES = [
+      { name: "London",     lat: 51.5074, lon: -0.1278 },
+      { name: "Birmingham", lat: 52.4862, lon: -1.8904 },
+      { name: "Manchester", lat: 53.4808, lon: -2.2426 },
+      { name: "Leeds",      lat: 53.8008, lon: -1.5491 },
+      { name: "Liverpool",  lat: 53.4084, lon: -2.9916 },
+      { name: "Bristol",    lat: 51.4545, lon: -2.5879 },
+      { name: "Edinburgh",  lat: 55.9533, lon: -3.1883 },
+      { name: "Glasgow",    lat: 55.8642, lon: -4.2518 },
+      { name: "Cardiff",    lat: 51.4816, lon: -3.1791 },
+      { name: "Newcastle",  lat: 54.9783, lon: -1.6178 },
+      { name: "Nottingham", lat: 52.9548, lon: -1.1581 },
+      { name: "Norwich",    lat: 52.6309, lon:  1.2974 },
+      { name: "Cambridge",  lat: 52.2053, lon:  0.1218 },
+      { name: "Oxford",     lat: 51.7520, lon: -1.2577 },
+      { name: "York",       lat: 53.9590, lon: -1.0815 },
+      { name: "Lincoln",    lat: 53.2307, lon: -0.5406 },
+    ];
 
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-            attribution: "© OpenStreetMap © CARTO",
-            maxZoom: 18,
-        }).addTo(map);
+    // ── MAP ──────────────────────────────────────────────
+    const map = L.map("map", { zoomControl: true }).setView([53.5, -2.0], 6);
 
-        function makeCityIcon() {
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
-                <circle cx="5" cy="5" r="4" fill="#475569" stroke="#94a3b8" stroke-width="1"/>
-            </svg>`;
-            return L.divIcon({ html: svg, className: "", iconSize: [10, 10], iconAnchor: [5, 5] });
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/" target="_blank">CARTO</a>',
+      maxZoom: 18,
+    }).addTo(map);
+
+    // ── ICONS ────────────────────────────────────────────
+    function makeCityIcon() {
+      return L.divIcon({
+        html: `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8">
+          <circle cx="4" cy="4" r="3" fill="rgba(218,218,218,0.15)" stroke="rgba(218,218,218,0.35)" stroke-width="1"/>
+        </svg>`,
+        className: "", iconSize: [8, 8], iconAnchor: [4, 4],
+      });
+    }
+
+    function makeFieldIcon(state) {
+      const sz = (state === "green" || state === "amber" || state === "red") ? 16 : 14;
+      const h  = sz / 2;
+      let inner = "";
+
+      if (state === "idle") {
+        inner = `<circle cx="${h}" cy="${h}" r="${h-2}" fill="none" stroke="#DADADA" stroke-width="1.2"/>
+                 <circle cx="${h}" cy="${h}" r="2.5" fill="#DADADA"/>`;
+      } else if (state === "loading") {
+        inner = `<circle cx="${h}" cy="${h}" r="${h-2}" fill="none" stroke="rgba(218,218,218,0.15)" stroke-width="1.5"/>
+                 <path d="M${h} 2 A${h-2} ${h-2} 0 0 1 ${sz-2} ${h}" fill="none" stroke="#DADADA" stroke-width="1.5" stroke-linecap="round">
+                   <animateTransform attributeName="transform" type="rotate" from="0 ${h} ${h}" to="360 ${h} ${h}" dur="0.7s" repeatCount="indefinite"/>
+                 </path>`;
+      } else if (state === "green") {
+        inner = `<circle cx="${h}" cy="${h}" r="${h-2}" fill="none" stroke="#DADADA" stroke-width="1.5"/>
+                 <circle cx="${h}" cy="${h}" r="3" fill="#DADADA"/>`;
+      } else if (state === "amber") {
+        inner = `<circle cx="${h}" cy="${h}" r="${h-2}" fill="none" stroke="rgba(218,218,218,0.5)" stroke-width="1.5"/>
+                 <circle cx="${h}" cy="${h}" r="3" fill="rgba(218,218,218,0.5)"/>`;
+      } else if (state === "red") {
+        inner = `<rect x="2" y="2" width="${sz-4}" height="${sz-4}" fill="rgba(218,218,218,0.08)" stroke="rgba(218,218,218,0.4)" stroke-width="1.5"/>`;
+      }
+
+      return L.divIcon({
+        html: `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">${inner}</svg>`,
+        className: "", iconSize: [sz, sz], iconAnchor: [h, h],
+      });
+    }
+
+    // ── CITY MARKERS ─────────────────────────────────────
+    CITIES.forEach(city => {
+      L.marker([city.lat, city.lon], { icon: makeCityIcon(), zIndexOffset: -200, interactive: false })
+        .addTo(map)
+        .bindTooltip(city.name, { permanent: true, direction: "top", offset: [0, -5], opacity: 1 });
+    });
+
+    // ── FIELD MARKERS ────────────────────────────────────
+    async function fetchPrediction(fieldId) {
+      const today = new Date().toISOString().split("T")[0];
+      const resp  = await fetch(`${API_BASE}/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field_id: fieldId, event_timestamp: today + "T00:00:00" }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    FIELDS.forEach(field => {
+      const marker = L.marker([field.lat, field.lon], { icon: makeFieldIcon("idle") }).addTo(map);
+
+      marker.on("click", async () => {
+        marker.setIcon(makeFieldIcon("loading"));
+
+        marker.bindPopup(
+          `<div class="popup-wrap">
+            <div class="popup-tag">Field</div>
+            <div class="popup-field-name">${field.name}</div>
+            <div class="popup-divider"></div>
+            <div class="loading-wrap"><div class="loading-ring"></div>Fetching prediction&hellip;</div>
+            <div class="popup-meta">${field.crop} &middot; ${field.region}</div>
+          </div>`,
+          { maxWidth: 260, minWidth: 220 }
+        ).openPopup();
+
+        try {
+          const data      = await fetchPrediction(field.id);
+          const drift     = data.drift_level || "green";
+          const badgeText = drift === "red" ? "High Drift" : drift === "amber" ? "Moderate Drift" : "Stable";
+
+          marker.setIcon(makeFieldIcon(drift));
+          marker.getPopup().setContent(
+            `<div class="popup-wrap">
+              <div class="popup-tag">Field Prediction</div>
+              <div class="popup-field-name">${field.name}</div>
+              <div class="popup-divider"></div>
+              <div class="popup-yield">${Math.round(data.predicted_yield_kg_ha).toLocaleString("en-GB")}</div>
+              <div class="popup-unit">kg / hectare</div>
+              <div class="popup-ci">80% CI &nbsp;${Math.round(data.lower_bound).toLocaleString("en-GB")} &ndash; ${Math.round(data.upper_bound).toLocaleString("en-GB")} kg/ha</div>
+              <span class="popup-badge badge-${drift}">${badgeText}</span>
+              <div class="popup-divider"></div>
+              <div class="popup-meta">${field.crop} &middot; ${field.region}</div>
+              <div class="popup-meta">Model v${data.model_version} &middot; ${new Date(data.last_updated).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}</div>
+              ${data.stale_features ? '<div class="popup-stale">&#9651; Stale feature data</div>' : ""}
+            </div>`
+          );
+        } catch (err) {
+          marker.setIcon(makeFieldIcon("idle"));
+          marker.getPopup().setContent(
+            `<div class="popup-wrap">
+              <div class="popup-tag">Field</div>
+              <div class="popup-field-name">${field.name}</div>
+              <div class="popup-divider"></div>
+              <div class="popup-error">Could not load prediction.<br><span style="opacity:0.45">${err.message}</span></div>
+            </div>`
+          );
         }
-
-        function makeIcon(color) {
-            const c = color === "red" ? "#ef4444" : color === "amber" ? "#f97316" : "#22c55e";
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="9" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2"/>
-                <circle cx="12" cy="12" r="4" fill="${c}"/>
-            </svg>`;
-            return L.divIcon({ html: svg, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
-        }
-
-        CITIES.forEach(city => {
-            L.marker([city.lat, city.lon], { icon: makeCityIcon(), zIndexOffset: -100 })
-                .addTo(map)
-                .bindTooltip(city.name, {
-                    permanent: true,
-                    direction: "top",
-                    offset: [0, -6],
-                    opacity: 0.9,
-                });
-        });
-
-        async function fetchPrediction(fieldId) {
-            const today = new Date().toISOString().split("T")[0];
-            const resp = await fetch(`${API_BASE}/predict`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ field_id: fieldId, event_timestamp: today + "T00:00:00" }),
-            });
-            if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-            return resp.json();
-        }
-
-        FIELDS.forEach(field => {
-            const marker = L.marker([field.lat, field.lon], { icon: makeIcon("green") }).addTo(map);
-            marker.on("click", async () => {
-                marker.bindPopup(`
-                    <div class="popup-field-name">${field.name}</div>
-                    <div style="text-align:center;padding:12px 0"><div class="loading-ring"></div></div>
-                    <div class="popup-meta">${field.crop} · ${field.region}</div>
-                `).openPopup();
-                try {
-                    const data = await fetchPrediction(field.id);
-                    const badgeClass = data.drift_level === "red" ? "badge-red" : data.drift_level === "amber" ? "badge-amber" : "badge-green";
-                    const badgeText = data.drift_level === "red" ? "⚠ High Drift" : data.drift_level === "amber" ? "⚡ Moderate Drift" : "✓ Stable";
-                    marker.setIcon(makeIcon(data.drift_level));
-                    marker.getPopup().setContent(`
-                        <div class="popup-field-name">${field.name}</div>
-                        <div class="popup-yield">${Math.round(data.predicted_yield_kg_ha).toLocaleString()}</div>
-                        <div class="popup-unit">kg / hectare</div>
-                        <div class="popup-ci">80% CI: ${Math.round(data.lower_bound).toLocaleString()} – ${Math.round(data.upper_bound).toLocaleString()} kg/ha</div>
-                        <span class="popup-badge ${badgeClass}">${badgeText}</span>
-                        <div class="popup-meta">${field.crop} · ${field.region}</div>
-                        <div class="popup-meta">Model v${data.model_version} · ${new Date(data.last_updated).toLocaleString("en-GB")}</div>
-                        ${data.stale_features ? '<div class="popup-meta" style="color:#f87171">⚠ Stale features</div>' : ''}
-                    `);
-                } catch (err) {
-                    marker.getPopup().setContent(`
-                        <div class="popup-field-name">${field.name}</div>
-                        <div style="color:#f87171;font-size:0.85rem">Failed to load prediction.<br>${err.message}</div>
-                    `);
-                }
-            });
-        });
-    </script>
+      });
+    });
+  </script>
 </body>
-
 </html>
