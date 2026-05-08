@@ -36,6 +36,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
+# Limit concurrent Open-Meteo calls — free Render has 1 CPU and
+# firing 100+ simultaneous HTTP requests causes most to timeout.
+_PREDICT_SEMAPHORE = asyncio.Semaphore(10)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,55 +84,56 @@ def get_field_meta(field_id: str) -> dict:
 
 async def _predict_one(field_id: str, row: pd.Series) -> dict:
     """Run a single field prediction — used by bulk /fields endpoint."""
-    try:
-        loop = asyncio.get_event_loop()
-        live = await loop.run_in_executor(
-            None,
-            get_live_features,
-            field_id,
-            float(row["lat"]),
-            float(row["lon"]),
-        )
-        features = {**row.to_dict(), **live}
-        drift_result = evaluate_drift(field_id, features)
-        feat_df = pd.DataFrame([features])
-        preds, lower, upper = model_module.predict(feat_df)
-        return {
-            "field_id": field_id,
-            "name": str(row.get("name", field_id)),
-            "lat": float(row["lat"]),
-            "lon": float(row["lon"]),
-            "crop_type": str(row.get("crop_type", "")),
-            "region": str(row.get("region", "")),
-            "area_ha": round(float(row.get("area_ha", 0)), 1),
-            "soil_type": str(row.get("soil_type", "")),
-            "predicted_yield_kg_ha": round(float(preds[0]), 1),
-            "lower_bound": round(float(lower[0]), 1),
-            "upper_bound": round(float(upper[0]), 1),
-            "drift_warning": drift_result["drift_warning"],
-            "drift_level": drift_result["drift_level"],
-            "stale_features": live.get("stale_features", False),
-            "error": None,
-        }
-    except Exception as exc:
-        log.warning("Prediction failed for %s: %s", field_id, exc)
-        return {
-            "field_id": field_id,
-            "name": str(row.get("name", field_id)),
-            "lat": float(row["lat"]),
-            "lon": float(row["lon"]),
-            "crop_type": str(row.get("crop_type", "")),
-            "region": str(row.get("region", "")),
-            "area_ha": round(float(row.get("area_ha", 0)), 1),
-            "soil_type": str(row.get("soil_type", "")),
-            "predicted_yield_kg_ha": None,
-            "lower_bound": None,
-            "upper_bound": None,
-            "drift_warning": False,
-            "drift_level": "none",
-            "stale_features": False,
-            "error": str(exc),
-        }
+    async with _PREDICT_SEMAPHORE:
+        try:
+            loop = asyncio.get_event_loop()
+            live = await loop.run_in_executor(
+                None,
+                get_live_features,
+                field_id,
+                float(row["lat"]),
+                float(row["lon"]),
+            )
+            features = {**row.to_dict(), **live}
+            drift_result = evaluate_drift(field_id, features)
+            feat_df = pd.DataFrame([features])
+            preds, lower, upper = model_module.predict(feat_df)
+            return {
+                "field_id": field_id,
+                "name": str(row.get("name", field_id)),
+                "lat": float(row["lat"]),
+                "lon": float(row["lon"]),
+                "crop_type": str(row.get("crop_type", "")),
+                "region": str(row.get("region", "")),
+                "area_ha": round(float(row.get("area_ha", 0)), 1),
+                "soil_type": str(row.get("soil_type", "")),
+                "predicted_yield_kg_ha": round(float(preds[0]), 1),
+                "lower_bound": round(float(lower[0]), 1),
+                "upper_bound": round(float(upper[0]), 1),
+                "drift_warning": drift_result["drift_warning"],
+                "drift_level": drift_result["drift_level"],
+                "stale_features": live.get("stale_features", False),
+                "error": None,
+            }
+        except Exception as exc:
+            log.warning("Prediction failed for %s: %s", field_id, exc)
+            return {
+                "field_id": field_id,
+                "name": str(row.get("name", field_id)),
+                "lat": float(row["lat"]),
+                "lon": float(row["lon"]),
+                "crop_type": str(row.get("crop_type", "")),
+                "region": str(row.get("region", "")),
+                "area_ha": round(float(row.get("area_ha", 0)), 1),
+                "soil_type": str(row.get("soil_type", "")),
+                "predicted_yield_kg_ha": None,
+                "lower_bound": None,
+                "upper_bound": None,
+                "drift_warning": False,
+                "drift_level": "none",
+                "stale_features": False,
+                "error": str(exc),
+            }
 
 
 @app.get("/fields")
@@ -350,7 +355,7 @@ async def map_ui():
     .skel {
       border-radius: 6px; height: 12px;
       background: linear-gradient(90deg, var(--surface2) 25%, var(--faint) 50%, var(--surface2) 75%);
-      background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite;
+      background-size:200% 100%; animation:shimmer 1.4s ease-in-out infinite;
     }
 
     /* ── LEGEND ── */
@@ -497,7 +502,7 @@ async def map_ui():
           <path d="M20 20L25 15" stroke="#14532d" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         <div class="overlay-title">Agri Yield Intelligence</div>
-        <div class="overlay-sub" id="overlay-status">Connecting to model…</div>
+        <div class="overlay-sub" id="overlay-status">Connecting to model\u2026</div>
         <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
       </div>
     </div>
@@ -701,7 +706,7 @@ async def map_ui():
     bar.style.background = color;
     setTimeout(() => { bar.style.width = pct + '%'; }, 50);
 
-    // Weather placeholders (live data baked into prediction; show what we have)
+    // Weather placeholders
     document.getElementById('wx-temp').textContent = '\u2014';
     document.getElementById('wx-rain').textContent = '\u2014';
     document.getElementById('wx-rad').textContent  = '\u2014';
@@ -721,7 +726,6 @@ async def map_ui():
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ field_id: f.field_id }),
     }).then(r => r.json()).then(d => {
-      // The predict call re-runs live features; update stale badge if needed
       if (d.stale_features) {
         document.getElementById('wx-temp').textContent = 'Stale';
         document.getElementById('wx-rain').textContent = 'Stale';
