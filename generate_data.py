@@ -88,7 +88,7 @@ def generate():
     df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     df.to_parquet(OUTPUT_PATH, index=False)
-    print(f"Generated {len(df)} rows → {OUTPUT_PATH}")
+    print(f"Generated {len(df)} rows -> {OUTPUT_PATH}")
     print(f"Columns: {list(df.columns)}")
     return df
 

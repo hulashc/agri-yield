@@ -41,12 +41,7 @@ jobs:
           set -e
           ruff check . --output-format=github
 
-      - name: Generate synthetic training data
-        run: |
-          set -e
-          python generate_data.py
-
-      - name: Train model and save model.pkl
+      - name: Generate training data (real CYCleSS or synthetic fallback) and train model
         run: |
           set -e
           python training/train_and_export.py

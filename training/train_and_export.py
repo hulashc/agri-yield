@@ -1,7 +1,7 @@
 """
 CI training script.
-Trains XGBoost on synthetic data and saves model.pkl to repo root.
-Uses the canonical FEATURE_COLS from training.utils.features.
+Trains XGBoost on real CYCleSS data when available, falls back to synthetic.
+Saves model.pkl to repo root. Uses the canonical FEATURE_COLS.
 """
 
 import os
@@ -19,13 +19,32 @@ from training.utils.splits import temporal_train_test_split
 
 TARGET = "yield_kg_per_ha"
 OUTPUT_PATH = "model.pkl"
+DATASET_PATH = "data/features/weekly_field_features.parquet"
 
 
-def train_and_export(
-    dataset_path: str = "data/features/weekly_field_features.parquet",
-):
-    print(f"Loading dataset from {dataset_path}...")
-    df = pd.read_parquet(dataset_path)
+def ensure_dataset():
+    """Prepare real CYCleSS data if available, otherwise generate synthetic data."""
+    if not os.path.exists(DATASET_PATH):
+        raw_dirs = [
+            "cycless_data/CYCleSS_dataset/data/crop_yield_type_and_satellite_data",
+            "data/raw/cycless/CYCleSS_dataset/data/crop_yield_type_and_satellite_data",
+        ]
+        if any(os.path.exists(d) for d in raw_dirs) or os.path.exists("data/raw/cycless.zip"):
+            print("Real CYCleSS data found — processing into training features...")
+            from training.prepare_real_data import prepare
+
+            prepare()
+        else:
+            print("Real data not found — generating synthetic training data...")
+            from generate_data import generate
+
+            generate()
+
+
+def train_and_export():
+    ensure_dataset()
+    print(f"Loading dataset from {DATASET_PATH}...")
+    df = pd.read_parquet(DATASET_PATH)
     df = df.dropna(subset=[TARGET])
     print(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
 
