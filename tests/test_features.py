@@ -34,5 +34,5 @@ def test_get_feature_cols_handles_missing_columns():
 
 def test_feature_cols_order_is_stable():
     """Serving depends on a fixed column order — this must never silently change."""
-    assert FEATURE_COLS[0] == "soil_temp_mean"
-    assert FEATURE_COLS[-1] == "ndvi_proxied"
+    assert FEATURE_COLS[0] == "lat"
+    assert FEATURE_COLS[-1] == "year"

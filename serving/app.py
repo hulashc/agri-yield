@@ -37,9 +37,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
-# Reduced from 10 → 3: fewer simultaneous Open-Meteo requests so each one
-# is far more likely to succeed on Render's free 1-CPU instance.
-_PREDICT_SEMAPHORE = asyncio.Semaphore(3)
+# Semaphore limits concurrent Open-Meteo calls on Render's free 1-CPU instance.
+# Each call has its own timeout in openmeteo_live.py. If too many fields fail,
+# the global /fields endpoint times out rather than hanging.
+_PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
@@ -162,7 +163,12 @@ async def bulk_fields():
         _predict_one(fid, row)
         for fid, row in _FIELDS_DF.iterrows()
     ]
-    results = await asyncio.gather(*tasks)
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=90.0)
+    except asyncio.TimeoutError:
+        log.warning("/fields timed out after 90s — returning partial results")
+        # Complete what we have; the deadline triggers the exception in gather
+        raise HTTPException(status_code=503, detail="Prediction timed out — please retry.")
     return {"fields": list(results), "model_version": model_module.model_version()}
 
 

@@ -94,7 +94,7 @@ def fetch_live_weather(lat: float, lon: float) -> dict:
         "timezone": "Europe/London",
         "forecast_days": 7,
     }
-    resp = requests.get(OPEN_METEO_URL, params=params, timeout=10)
+    resp = requests.get(OPEN_METEO_URL, params=params, timeout=8)
     resp.raise_for_status()
     return resp.json()
 

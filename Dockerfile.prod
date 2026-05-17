@@ -8,6 +8,7 @@ RUN uv sync --frozen --no-dev --python /usr/local/bin/python3.13
 
 # ── Stage 2: lean runtime image ───────────────────────────────────────────────
 FROM python:3.13-slim AS runtime
+ARG BUILD_VERSION=dev
 WORKDIR /app
 
 COPY --from=builder /app/.venv ./.venv
@@ -32,6 +33,7 @@ ENV MLFLOW_TRACKING_URI=disabled
 # Absolute paths as belt-and-braces (serving/* also resolves via __file__)
 ENV PICKLE_MODEL_PATH=/app/model.pkl
 ENV FIELDS_CSV_PATH=/app/data/seed/uk_fields.csv
+ENV BUILD_VERSION=${BUILD_VERSION}
 
 EXPOSE 8000
 # Use $PORT if set (Render injects it dynamically), fallback to 8000 for local

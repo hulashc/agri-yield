@@ -46,6 +46,16 @@ jobs:
           set -e
           python training/train_and_export.py
 
+      - name: Install test dependencies
+        run: |
+          set -e
+          pip install pytest pytest-md
+
+      - name: Run tests
+        run: |
+          set -e
+          python -m pytest tests/ -v --tb=short
+
       - name: Verify model.pkl exists
         run: |
           set -e
@@ -65,6 +75,8 @@ jobs:
           context: .
           file: Dockerfile.prod
           push: true
+          build-args: |
+            BUILD_VERSION=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -81,3 +93,23 @@ jobs:
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: curl -fsSL "$RENDER_DEPLOY_HOOK"
+
+      - name: Wait for deploy and verify /health
+        if: env.RENDER_SERVICE_URL != ''
+        env:
+          RENDER_SERVICE_URL: ${{ secrets.RENDER_SERVICE_URL }}
+        run: |
+          set -e
+          echo "Waiting for Render deploy (cold start ~50s)..."
+          for i in $(seq 1 30); do
+            sleep 10
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$RENDER_SERVICE_URL/health" 2>/dev/null || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Deploy verified — /health returned 200"
+              curl -s "$RENDER_SERVICE_URL/health"
+              exit 0
+            fi
+            echo "Attempt $i: status=$status"
+          done
+          echo "Deploy verification failed — /health never returned 200"
+          exit 1
