@@ -60,7 +60,7 @@ async def _startup_load():
         log.warning("%s not found.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_model)
 
 
@@ -111,7 +111,7 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
     """Run a single field prediction — used by bulk /fields endpoint."""
     async with _PREDICT_SEMAPHORE:
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             live = await loop.run_in_executor(
                 None,
                 get_live_features,
@@ -222,15 +222,16 @@ async def predict(request: PredictRequest) -> dict:
     start = time.time()
     field_meta = get_field_meta(request.field_id)
 
-    # Run the blocking requests.get call in a thread pool — never block the event loop.
-    loop = asyncio.get_event_loop()
-    live = await loop.run_in_executor(
-        None,
-        get_live_features,
-        request.field_id,
-        float(field_meta["lat"]),
-        float(field_meta["lon"]),
-    )
+    # Throttle live-weather fetches with the same semaphore as bulk /fields
+    async with _PREDICT_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        live = await loop.run_in_executor(
+            None,
+            get_live_features,
+            request.field_id,
+            float(field_meta["lat"]),
+            float(field_meta["lon"]),
+        )
 
     if live.get("stale_features"):
         STALE_FEATURE_REQUESTS.labels(field_id=request.field_id).inc()

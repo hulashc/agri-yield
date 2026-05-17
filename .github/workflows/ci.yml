@@ -22,27 +22,50 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install dependencies
-        run: |
-          set -e
-          pip install --upgrade pip
-          pip install \
-            numpy pandas scikit-learn xgboost pyarrow \
-            fastapi uvicorn pydantic requests tenacity \
-            prometheus-client prometheus-fastapi-instrumentator \
-            mlflow feast redis ruff pytest pytest-md httpx
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies (locked)
+        run: uv sync --frozen --dev
 
       - name: Lint with ruff
-        run: |
-          set -e
-          ruff check . --output-format=github
+        run: uv run ruff check . --output-format=github
+
+      - name: Type check with mypy
+        run: uv run mypy .
 
       - name: Generate training data and train model
-        run: |
-          set -e
-          python training/train_and_export.py
+        run: uv run python training/train_and_export.py
 
-      - name: Run tests
+      - name: Assert model quality gate (RMSE < 2000 kg/ha)
         run: |
-          set -e
-          python -m pytest tests/ -v --tb=short
+          uv run python - <<'EOF'
+          import pickle, numpy as np, pandas as pd
+          from training.utils.features import FEATURE_COLS
+          from training.utils.splits import temporal_train_test_split
+
+          TARGET = "yield_kg_per_ha"
+          df = pd.read_parquet("data/features/weekly_field_features.parquet")
+          df = df.dropna(subset=[TARGET])
+          for col in FEATURE_COLS:
+              if col not in df.columns:
+                  df[col] = 0
+          df["week_start"] = pd.to_datetime(
+              df["year"].astype(str) + "-W" + df["week_of_year"].astype(str).str.zfill(2) + "-1",
+              format="%G-W%V-%u",
+              errors="coerce",
+          )
+          _, test_df = temporal_train_test_split(df)
+          with open("model.pkl", "rb") as f:
+              model = pickle.load(f)
+          preds = model.predict(test_df[FEATURE_COLS])
+          rmse = float(np.sqrt(np.mean((test_df[TARGET].values - preds) ** 2)))
+          print(f"Quality gate RMSE: {rmse:.2f} kg/ha")
+          assert rmse < 2000, f"RMSE {rmse:.2f} exceeds threshold of 2000 kg/ha — failing CI"
+          print("Quality gate passed.")
+          EOF
+
+      - name: Run tests with coverage
+        run: |
+          uv run python -m pytest tests/ -v --tb=short \
+            --cov=. --cov-report=term-missing --cov-fail-under=60

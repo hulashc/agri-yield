@@ -8,12 +8,10 @@ dependencies = [
     "confluent-kafka>=2.14.0",
     "dvc[gdrive,s3]>=3.67.1",
     "evidently>=0.7.21",
-    "faker>=40.15.0",
     "fastapi>=0.136.1",
     "feast>=0.62.0",
     "grafana-api>=1.0.3",
     "great-expectations>=1.17.0",
-    "kafka-python>=2.3.1",
     "mlflow>=3.11.1",
     "numpy>=2.4.4",
     "optuna>=4.8.0",
@@ -32,10 +30,13 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "faker>=40.15.0",
     "hatchling>=1.29.0",
+    "httpx>=0.28.0",
     "mypy>=1.20.2",
     "pre-commit>=4.6.0",
     "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
     "ruff>=0.15.12",
     "types-requests>=2.33.0.20260408",
 ]
@@ -64,7 +65,7 @@ package = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["requests", "requests.*", "feast.*", "pyspark.*", "kafka.*"]
+module = ["requests", "requests.*", "feast.*", "pyspark.*", "kafka.*", "confluent_kafka.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
