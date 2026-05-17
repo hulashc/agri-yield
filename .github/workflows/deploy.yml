@@ -34,22 +34,17 @@ jobs:
             numpy pandas scikit-learn xgboost pyarrow \
             fastapi uvicorn pydantic requests tenacity \
             prometheus-client prometheus-fastapi-instrumentator \
-            mlflow ruff
+            mlflow feast redis ruff pytest pytest-md httpx
 
       - name: Lint with ruff
         run: |
           set -e
           ruff check . --output-format=github
 
-      - name: Generate training data (real CYCleSS or synthetic fallback) and train model
+      - name: Generate training data and train model
         run: |
           set -e
           python training/train_and_export.py
-
-      - name: Install test dependencies
-        run: |
-          set -e
-          pip install pytest pytest-md httpx
 
       - name: Run tests
         run: |

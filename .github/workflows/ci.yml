@@ -1,4 +1,4 @@
-name: CI
+name: CI — Lint & Test
 
 on:
   pull_request:
@@ -12,8 +12,6 @@ env:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
       - name: Checkout
@@ -32,7 +30,7 @@ jobs:
             numpy pandas scikit-learn xgboost pyarrow \
             fastapi uvicorn pydantic requests tenacity \
             prometheus-client prometheus-fastapi-instrumentator \
-            mlflow ruff pytest pytest-md httpx mypy
+            mlflow feast redis ruff pytest pytest-md httpx
 
       - name: Lint with ruff
         run: |

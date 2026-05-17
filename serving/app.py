@@ -14,7 +14,8 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 import serving.model as model_module
 from ingestion.openmeteo_live import get_live_features
@@ -44,6 +45,9 @@ _PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
+# Resolved path to the bundled static frontend
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 
 async def _startup_load():
     """Load CSV + model in the background so the port binds immediately."""
@@ -66,23 +70,35 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# ---------------------------------------------------------------------------
+# CORS: lock to known origins only — no wildcard subdomains
+# ---------------------------------------------------------------------------
+_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "https://hulashc.github.io",
+]
+# Allow an explicit override from env (e.g. your specific Vercel deployment URL)
+_extra_origin = os.getenv("EXTRA_CORS_ORIGIN", "").strip()
+if _extra_origin:
+    _ALLOWED_ORIGINS.append(_extra_origin)
+
 app = FastAPI(title="Agri Yield API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3001",
-        "http://localhost:3000",
-        "http://127.0.0.1:3001",
-        "https://hulashc.github.io",
-        "https://*.vercel.app",
-    ],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 app.include_router(metrics_router)
+
+# Serve bundled frontend assets (CSS, JS, icons) under /static
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 def get_field_meta(field_id: str) -> dict:
@@ -155,26 +171,34 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
 async def bulk_fields():
     """Return all fields with live predictions — powers the map UI."""
     if _FIELDS_DF.empty:
-        raise HTTPException(status_code=503, detail="Fields not loaded yet — please retry in a moment.")
+        raise HTTPException(
+            status_code=503,
+            detail="Fields not loaded yet — please retry in a moment.",
+        )
     if not model_module.is_loaded():
-        raise HTTPException(status_code=503, detail="Model not loaded yet — please retry in a moment.")
+        raise HTTPException(
+            status_code=503,
+            detail="Model not loaded yet — please retry in a moment.",
+        )
 
-    tasks = [
-        _predict_one(fid, row)
-        for fid, row in _FIELDS_DF.iterrows()
-    ]
+    tasks = [_predict_one(fid, row) for fid, row in _FIELDS_DF.iterrows()]
     try:
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=90.0)
     except TimeoutError:
-        log.warning("/fields timed out after 90s — returning partial results")
-        # Complete what we have; the deadline triggers the exception in gather
-        raise HTTPException(status_code=503, detail="Prediction timed out — please retry.")
+        log.warning("/fields timed out after 90s")
+        raise HTTPException(
+            status_code=503, detail="Prediction timed out — please retry."
+        )
     return {"fields": list(results), "model_version": model_module.model_version()}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def map_ui():
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    """Serve the frontend SPA from serving/static/index.html."""
+    index = _STATIC_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=503, detail="Frontend not built.")
+    return FileResponse(str(index))
 
 
 @app.get("/health")
@@ -191,10 +215,14 @@ def health() -> dict:
 @app.post("/predict")
 async def predict(request: PredictRequest) -> dict:
     if not model_module.is_loaded():
-        raise HTTPException(status_code=503, detail="Model not loaded yet — please retry in a moment.")
+        raise HTTPException(
+            status_code=503, detail="Model not loaded yet — please retry in a moment."
+        )
 
     start = time.time()
     field_meta = get_field_meta(request.field_id)
+
+    # Run the blocking requests.get call in a thread pool — never block the event loop.
     loop = asyncio.get_event_loop()
     live = await loop.run_in_executor(
         None,
