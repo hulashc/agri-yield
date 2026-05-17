@@ -36,7 +36,7 @@ def ensure_dataset():
             prepare()
         else:
             print("Real data not found — generating synthetic training data...")
-            from generate_data import generate
+            from scripts.archive.generate_data import generate
 
             generate()
 

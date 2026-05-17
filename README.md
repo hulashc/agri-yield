@@ -1,6 +1,6 @@
 # 🌾 Agri Yield — UK Field Intelligence
 
-![Live](https://img.shields.io/badge/status-live-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.13-blue) ![Docker](https://img.shields.io/badge/docker-ghcr.io-blue) [![CI](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml) [![Ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)
+![Live](https://img.shields.io/badge/status-live-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.13-blue) ![Docker](https://img.shields.io/badge/docker-ghcr.io-blue) [![CI](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml) [![Deploy](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml) [![Ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)
 
 A production-grade **ML-powered crop yield prediction platform** for UK agricultural fields. Combines live weather data, soil attributes, and an XGBoost regression model to predict yield (kg/ha) per field — served via a real-time FastAPI backend and an interactive Leaflet map dashboard.
 
@@ -19,7 +19,7 @@ A production-grade **ML-powered crop yield prediction platform** for UK agricult
 ## ✨ Features
 
 - 🗺️ **Interactive UK field map** — 113 fields coloured by predicted yield (red → green)
-- 🤖 **XGBoost yield model** — trained on synthetic UK agricultural data, baked into the Docker image at CI time
+- 🤖 **XGBoost yield model** — trained on real CYCleSS UK yield data (934 field-year records), with synthetic fallback, baked into the Docker image at CI time
 - 🌤️ **Live weather integration** — Open-Meteo API fetches real-time temperature, precipitation, and solar radiation per field
 - 📊 **Confidence intervals** — every prediction includes an 80% CI band
 - 🚨 **Drift detection** — PSI-based feature drift monitoring with per-field warning badges
@@ -34,7 +34,7 @@ A production-grade **ML-powered crop yield prediction platform** for UK agricult
 ```
 ┌─────────────────────────────────────────────────┐
 │                  GitHub Actions CI               │
-│  generate_data.py → train_and_export.py          │
+│  scripts/archive/generate_data.py (fallback)      │
 │  → model.pkl → Dockerfile.prod → ghcr.io image  │
 └────────────────────┬────────────────────────────┘
                      │ docker pull
@@ -48,7 +48,7 @@ A production-grade **ML-powered crop yield prediction platform** for UK agricult
 │  │    └── ingestion/openmeteo_live.py            │
 │  │         └── Open-Meteo API  (live weather)    │
 │  ├── GET /metrics (Prometheus)                   │
-│  └── Static HTML/JS dashboard (serving/static/) │
+│  └── Static HTML/JS dashboard (serving/static/index.html) │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -72,7 +72,7 @@ uv sync
 ### 2. Generate data and train the model
 
 ```bash
-python generate_data.py
+# Synthetic fallback only if no real CYCleSS data
 python training/train_and_export.py
 ```
 
@@ -103,7 +103,7 @@ docker run -p 8000:8000 agri-yield
 | Target | `yield_kg_per_ha` |
 | Features | lat, lon, area, crop type, soil type, region, temperature, precipitation, solar radiation, ET₀, soil moisture, NDVI, week of year |
 | Train/test split | 80/20 |
-| RMSE | ~500–800 kg/ha (synthetic data) |
+| RMSE | ~1759 kg/ha (real CYCleSS) / ~1724 kg/ha (synthetic fallback) |
 | Confidence interval | ±15% of prediction (configurable via `CI_WIDTH` env var) |
 
 The model is **retrained from scratch on every CI run** — no stale artefacts, no manual uploads. The trained `model.pkl` is baked directly into the production Docker image.
@@ -129,7 +129,8 @@ Fallback chain: **Redis cache → Live API → In-memory cache → UK seasonal d
 ```
 agri-yield/
 ├── .github/workflows/
-│   └── deploy.yml           # Train → Build → Push → Deploy
+│   ├── ci.yml               # Lint, test, typecheck on every PR
+│   └── deploy.yml           # Train → Build → Push → Deploy (main only)
 ├── data/
 │   ├── seed/
 │   │   └── uk_fields.csv    # 113 UK farm fields with metadata
@@ -146,7 +147,10 @@ agri-yield/
 │       └── features.py      # Canonical FEATURE_COLS (single source of truth)
 ├── monitoring/
 │   └── drift.py             # PSI drift detector
-├── generate_data.py         # Synthetic UK agricultural data generator
+├── scripts/
+│   ├── archive/
+│   │   └── generate_data.py # Synthetic data generator (fallback)
+│   └── download_cycless.py  # CYCleSS UK yield data downloader
 ├── Dockerfile.prod          # Production image (bakes model.pkl)
 └── pyproject.toml
 ```
@@ -168,25 +172,28 @@ agri-yield/
 
 ## 🔄 CI/CD Pipeline
 
-Every push to `main` triggers `.github/workflows/deploy.yml`:
+Two workflows run on every push:
 
+**`ci.yml`** (all branches — PR gate):
+```
+push / PR → Ruff lint → Train model → pytest → pass/fail
+```
+
+**`deploy.yml`** (main only — train, build, deploy):
 ```
 push to main
     │
     ▼
-[1] Generate synthetic training data
+[1] Train XGBoost (real CYCleSS or synthetic fallback) → model.pkl
     │
     ▼
-[2] Train XGBoost → save model.pkl
+[2] docker build -f Dockerfile.prod  (bakes model.pkl in)
     │
     ▼
-[3] docker build -f Dockerfile.prod  (bakes model.pkl in)
+[3] docker push ghcr.io/hulashc/agri-yield:latest
     │
     ▼
-[4] docker push ghcr.io/hulashc/agri-yield:latest
-    │
-    ▼
-[5] curl RENDER_DEPLOY_HOOK  →  Render redeploys
+[4] curl RENDER_DEPLOY_HOOK  →  Render redeploys
 ```
 
 ---

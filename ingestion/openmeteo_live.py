@@ -10,7 +10,7 @@ Returns stale_features=True on any cache fallback.
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import requests
 
@@ -61,14 +61,14 @@ def _mem_cache_get(field_id: str) -> dict | None:
     if entry is None:
         return None
     features, ts = entry
-    age = (datetime.utcnow() - ts).total_seconds()
+    age = (datetime.now(UTC) - ts).total_seconds()
     if age > MEM_CACHE_TTL_SECONDS:
         return None
     return features
 
 
 def _mem_cache_set(field_id: str, features: dict) -> None:
-    _mem_cache[field_id] = (features, datetime.utcnow())
+    _mem_cache[field_id] = (features, datetime.now(UTC))
 
 
 _redis_client = None

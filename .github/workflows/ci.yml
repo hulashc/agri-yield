@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          set -e
+          pip install --upgrade pip
+          pip install \
+            numpy pandas scikit-learn xgboost pyarrow \
+            fastapi uvicorn pydantic requests tenacity \
+            prometheus-client prometheus-fastapi-instrumentator \
+            mlflow ruff pytest pytest-md httpx mypy
+
+      - name: Lint with ruff
+        run: |
+          set -e
+          ruff check . --output-format=github
+
+      - name: Generate training data and train model
+        run: |
+          set -e
+          python training/train_and_export.py
+
+      - name: Run tests
+        run: |
+          set -e
+          python -m pytest tests/ -v --tb=short
