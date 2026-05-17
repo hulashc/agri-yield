@@ -3,7 +3,6 @@ Smoke tests for temporal train/test split.
 """
 
 import pandas as pd
-import pytest
 
 from training.utils.splits import temporal_train_test_split
 

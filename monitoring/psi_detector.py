@@ -14,12 +14,13 @@ because training data uses synthetic/proxy values. PSI is only meaningful
 once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
 """
 
-import numpy as np
-import pandas as pd
 import logging
 from pathlib import Path
-from typing import Optional
-from monitoring.prometheus_metrics import DRIFT_WARNINGS_TOTAL, PSI_SCORE, DRIFT_LEVEL
+
+import numpy as np
+import pandas as pd
+
+from monitoring.prometheus_metrics import DRIFT_LEVEL, DRIFT_WARNINGS_TOTAL, PSI_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def load_reference_distribution(
 def evaluate_drift(
     field_id: str,
     live_features: dict,
-    reference_cache: Optional[dict] = None,
+    reference_cache: dict | None = None,
 ) -> dict:
     """
     Run PSI for each monitored feature using a rolling buffer of live values.

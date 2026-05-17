@@ -3,7 +3,6 @@ import subprocess
 from datetime import datetime
 
 import pandas as pd
-
 from feast import FeatureStore
 from feast.data_source import PushMode
 

@@ -1,6 +1,7 @@
 from datetime import timedelta
+
 from feast import Entity, FeatureView, Field, FileSource
-from feast.types import Float32, Bool
+from feast.types import Bool, Float32
 from feast.value_type import ValueType
 
 field = Entity(name="field_id", join_keys=["field_id"], value_type=ValueType.STRING)

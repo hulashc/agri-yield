@@ -15,7 +15,6 @@ def run_training() -> str:
     logger.info("Starting model training")
 
     try:
-        import mlflow
         from training.train import train_model
 
         run_id = train_model()

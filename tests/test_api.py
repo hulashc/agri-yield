@@ -6,7 +6,6 @@ Uses a toy XGBoost model, mock weather/drift, and 3 test fields.
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-import pytest
 
 
 def test_health_returns_200(app):
@@ -32,6 +31,7 @@ def test_health_reports_not_loaded_when_model_missing(monkeypatch):
         mock_drift.return_value = {"drift_warning": False, "drift_level": "none", "max_psi": 0.0, "psi_scores": {}}
         # Force re-import to pick up the missing model path
         import importlib
+
         import serving.app
         importlib.reload(serving.app)
         from serving.app import app

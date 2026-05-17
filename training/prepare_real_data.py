@@ -76,9 +76,6 @@ def extract_satellite_features(df: pd.DataFrame, year: int) -> pd.DataFrame:
     sat_cols = [c for c in df.columns if c.startswith(f"X{year}") or (c.startswith(f"X{year}") and c.endswith(".1"))]
     ratio_cols = [c for c in sat_cols if not c.endswith(".1")]
     ratio2_cols = [c for c in sat_cols if c.endswith(".1")]
-    suffix = ".1"
-    vh_cols = [c for c in df.columns if "VH" in c and c in sat_cols]
-    vv_cols = [c for c in df.columns if "VV" in c and c in sat_cols]
 
     result = pd.DataFrame({"ID": df["ID"].values})
 

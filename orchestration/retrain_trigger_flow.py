@@ -6,15 +6,16 @@ Wraps the existing training_flow and promotion_flow.
 Schedule: Every Sunday 02:00 UTC + on-demand drift trigger.
 """
 
-from prefect import flow, task, get_run_logger
-from datetime import datetime
-import mlflow
 import os
+from datetime import datetime
+
+import mlflow
+from prefect import flow, get_run_logger, task
 
 from monitoring.prometheus_metrics import (
+    LAST_RETRAIN_TIMESTAMP,
     RETRAIN_EVENTS,
     RETRAIN_PROMOTED,
-    LAST_RETRAIN_TIMESTAMP,
 )
 
 

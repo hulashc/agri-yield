@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Histogram, Gauge, Summary
+from prometheus_client import Counter, Gauge, Histogram, Summary
 
 PREDICTION_LATENCY = Histogram(
     "agri_yield_prediction_latency_seconds",

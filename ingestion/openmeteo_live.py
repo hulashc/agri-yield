@@ -8,11 +8,11 @@ In-memory cache used as fallback when Redis is absent (e.g. Render free tier).
 Returns stale_features=True on any cache fallback.
 """
 
-import requests
 import json
 import logging
 from datetime import date, datetime
-from typing import Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ _mem_cache: dict[str, tuple[dict, datetime]] = {}
 MEM_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
-def _mem_cache_get(field_id: str) -> Optional[dict]:
+def _mem_cache_get(field_id: str) -> dict | None:
     """Return cached features if present and not expired, else None."""
     entry = _mem_cache.get(field_id)
     if entry is None:
@@ -78,6 +78,7 @@ def get_redis():
     global _redis_client
     if _redis_client is None:
         import os
+
         import redis
         _redis_client = redis.Redis.from_url(
             os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True

@@ -4,9 +4,9 @@ from prefect import flow, get_run_logger
 
 from orchestration.ingest_flow import ingest_and_validate
 from orchestration.materialise_flow import materialise_features
-from orchestration.training_flow import run_training
-from orchestration.promotion_flow import promote_if_better
 from orchestration.monitoring_flow import run_monitoring
+from orchestration.promotion_flow import promote_if_better
+from orchestration.training_flow import run_training
 
 
 def send_alert(message: str) -> None:

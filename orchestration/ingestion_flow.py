@@ -4,8 +4,9 @@ Prefect flow that validates each ingestion batch.
 Aborts and alerts if Great Expectations fails.
 """
 
-from prefect import flow, task
 import pandas as pd
+from prefect import flow, task
+
 from contracts.sensor_expectations import validate_batch
 
 

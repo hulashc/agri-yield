@@ -6,15 +6,14 @@ Produces NDVI readings to the satellite-ndvi Kafka topic.
 """
 
 import json
-import time
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+import time
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import rasterio
-from pystac_client import Client
 from confluent_kafka import Producer
+from pystac_client import Client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,14 +38,14 @@ FIELD_BBOXES = {
 
 def fetch_latest_scene(
     field_id: str, bbox: tuple, lookback_days: int = 14
-) -> Optional[dict]:
+) -> dict | None:
     """
     Query STAC for the most recent Sentinel-2 scene covering this field.
     Returns scene metadata or None if no scenes found.
     """
     catalog = Client.open(STAC_URL)
 
-    end_date = datetime.now(timezone.utc)
+    end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=lookback_days)
 
     search = catalog.search(
@@ -78,7 +77,7 @@ def fetch_latest_scene(
 # ── NDVI computation ──────────────────────────────────────────────────────────
 
 
-def compute_ndvi(b04_url: str, b08_url: str) -> Optional[float]:
+def compute_ndvi(b04_url: str, b08_url: str) -> float | None:
     """
     Download B04 and B08 bands from a scene and compute mean NDVI over the scene.
     Returns float in [-1, 1] or None if download fails.
@@ -109,7 +108,7 @@ def compute_ndvi(b04_url: str, b08_url: str) -> Optional[float]:
 
 
 def produce_ndvi_message(
-    producer: Producer, field_id: str, scene: dict, ndvi: Optional[float]
+    producer: Producer, field_id: str, scene: dict, ndvi: float | None
 ):
     """Produce an NDVI message to Kafka."""
     message = {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 import pandas as pd
 
 METRICS_PATH = Path("data/monitoring/weekly_metrics.parquet")

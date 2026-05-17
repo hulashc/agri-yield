@@ -10,8 +10,7 @@ import math
 import random
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from confluent_kafka import Producer
 from faker import Faker
@@ -83,8 +82,8 @@ def npk_reading(crop: str) -> tuple:
 
 
 def inject_fault(
-    value: Optional[float], device: DeviceState, fault_probability: float = 0.10
-) -> tuple[Optional[float], str]:
+    value: float | None, device: DeviceState, fault_probability: float = 0.10
+) -> tuple[float | None, str]:
     """
     Apply one of three fault modes with 10% combined probability:
     - DROPOUT: return null (simulates sensor failure)
@@ -116,7 +115,7 @@ def inject_fault(
 
 def build_message(field_id: str, device: DeviceState) -> dict:
     """Build one sensor reading message with potential faults injected."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     doy = now.timetuple().tm_yday
     hour = now.hour
     crop = FIELD_CROPS[field_id]

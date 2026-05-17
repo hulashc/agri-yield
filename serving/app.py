@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -16,17 +16,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+import serving.model as model_module
 from ingestion.openmeteo_live import get_live_features
 from monitoring.prometheus_metrics import (
     PREDICTION_CI_WIDTH,
     PREDICTION_LATENCY,
-    PREDICTIONS_TOTAL,
     PREDICTION_YIELD_KG_HA,
+    PREDICTIONS_TOTAL,
     STALE_FEATURE_REQUESTS,
 )
 from monitoring.psi_detector import evaluate_drift
 from serving.metrics import metrics_router
-import serving.model as model_module
 from serving.model import load_model
 from serving.schemas import PredictRequest
 from serving.version import BUILD_VERSION
@@ -165,7 +165,7 @@ async def bulk_fields():
     ]
     try:
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=90.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.warning("/fields timed out after 90s — returning partial results")
         # Complete what we have; the deadline triggers the exception in gather
         raise HTTPException(status_code=503, detail="Prediction timed out — please retry.")
@@ -729,5 +729,5 @@ async def predict(request: PredictRequest) -> dict:
         "rainfall_mm": live.get("rainfall_today_mm"),
         "solar_rad_mj_m2": live.get("solar_radiation_today"),
         "model_version": model_module.model_version(),
-        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "last_updated": datetime.now(UTC).isoformat(),
     }

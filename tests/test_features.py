@@ -4,7 +4,6 @@ contract between training and serving is intact.
 """
 
 import pandas as pd
-import pytest
 
 from training.utils.features import FEATURE_COLS, NON_FEATURE_COLS, get_feature_cols
 

@@ -3,7 +3,6 @@ Download and extract the CYCleSS real UK crop yield dataset.
 CC0-1.0 license — free for any use.
 """
 
-import os
 import zipfile
 from pathlib import Path
 

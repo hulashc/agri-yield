@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 import requests
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")

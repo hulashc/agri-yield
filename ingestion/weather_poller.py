@@ -8,15 +8,15 @@ Sends permanent failures to dead-letter queue topic.
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from confluent_kafka import Producer
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -86,7 +86,7 @@ def parse_weather_message(station_id: str, raw: dict) -> dict:
     return {
         "station_id": station_id,
         "field_id": field_id,
-        "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "timestamp": int(datetime.now(UTC).timestamp() * 1000),
         "temperature": temp / 10
         if temp is not None
         else None,  # NOAA returns tenths of Celsius
@@ -109,7 +109,7 @@ def send_to_dlq(producer: Producer, station_id: str, error: str):
     dlq_message = {
         "station_id": station_id,
         "error": error,
-        "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "timestamp": int(datetime.now(UTC).timestamp() * 1000),
     }
     producer.produce(DLQ_TOPIC, key=station_id, value=json.dumps(dlq_message))
     producer.flush()
@@ -124,7 +124,7 @@ def run():
     producer = get_producer()
 
     while True:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         for station_id in STATION_IDS:
             try:
