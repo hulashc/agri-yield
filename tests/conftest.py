@@ -86,7 +86,8 @@ def app(model_pkl_path):
         }
         import serving.model
         importlib.reload(serving.model)
-        from serving.app import app, _startup_load
         import asyncio
+
+        from serving.app import _startup_load, app
         asyncio.run(_startup_load())
         yield app
