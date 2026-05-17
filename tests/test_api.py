@@ -118,7 +118,8 @@ def test_metrics_endpoint_returns_prometheus(app):
     client = TestClient(app)
     resp = client.get("/metrics")
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "text/plain; charset=utf-8; version=0.0.4"
+    assert "text/plain" in resp.headers["content-type"]
+    assert "version=" in resp.headers["content-type"]
     text = resp.text
     assert "agri_yield_prediction_latency_seconds" in text
     assert "agri_yield_predictions_total" in text

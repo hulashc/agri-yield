@@ -62,7 +62,7 @@ async def _startup_load():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(_startup_load())
+    await _startup_load()
     yield
 
 
