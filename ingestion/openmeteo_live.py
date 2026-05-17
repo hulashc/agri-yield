@@ -13,7 +13,6 @@ import json
 import logging
 from datetime import date, datetime
 from typing import Optional
-import redis
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +71,14 @@ def _mem_cache_set(field_id: str, features: dict) -> None:
     _mem_cache[field_id] = (features, datetime.utcnow())
 
 
-_redis_client: Optional[redis.Redis] = None
+_redis_client = None
 
 
-def get_redis() -> redis.Redis:
+def get_redis():
     global _redis_client
     if _redis_client is None:
         import os
+        import redis
         _redis_client = redis.Redis.from_url(
             os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True
         )

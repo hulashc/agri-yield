@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install training dependencies
+      - name: Install training and lint dependencies
         run: |
           set -e
           pip install --upgrade pip
@@ -34,7 +34,12 @@ jobs:
             numpy pandas scikit-learn xgboost pyarrow \
             fastapi uvicorn pydantic requests tenacity \
             prometheus-client prometheus-fastapi-instrumentator \
-            mlflow
+            mlflow ruff
+
+      - name: Lint with ruff
+        run: |
+          set -e
+          ruff check . --output-format=github
 
       - name: Generate synthetic training data
         run: |
@@ -49,7 +54,7 @@ jobs:
       - name: Install test dependencies
         run: |
           set -e
-          pip install pytest pytest-md
+          pip install pytest pytest-md httpx
 
       - name: Run tests
         run: |
@@ -80,13 +85,6 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-      - name: Force-retag latest in registry
-        run: |
-          docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker tag  ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.IMAGE_NAME }}:latest
-          echo "Retagged ${{ github.sha }} as latest"
 
       - name: Trigger Render deploy
         if: env.RENDER_DEPLOY_HOOK != ''
