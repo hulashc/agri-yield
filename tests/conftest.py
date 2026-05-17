@@ -1,3 +1,4 @@
+import importlib
 import pickle
 from unittest.mock import patch
 
@@ -19,7 +20,7 @@ def _train_toy_model() -> bytes:
         rows.append({col: float(rng.random()) for col in FEATURE_COLS})
     df = pd.DataFrame(rows)
     df[TARGET] = df["lat"] * 2000 + df["precipitation_sum"] * 300 + rng.normal(0, 200, n)
-    model = xgb.XGBRegressor(n_estimators=10, max_depth=3, random_state=42)
+    model = xgb.XGBRegressor(n_estimators=50, max_depth=4, random_state=42)
     model.fit(df[FEATURE_COLS], df[TARGET])
     return pickle.dumps(model)
 
@@ -83,5 +84,9 @@ def app(model_pkl_path):
             "max_psi": 0.05,
             "psi_scores": {},
         }
-        from serving.app import app
+        import serving.model
+        importlib.reload(serving.model)
+        from serving.app import app, _startup_load
+        import asyncio
+        asyncio.run(_startup_load())
         yield app

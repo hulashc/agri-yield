@@ -105,7 +105,3 @@ def predict(feature_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarra
 
 def model_version() -> str:
     return str(_model_version)
-
-
-def get_pickle_path() -> str:
-    return PICKLE_MODEL_PATH

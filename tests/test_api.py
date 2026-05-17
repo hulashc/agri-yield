@@ -29,9 +29,11 @@ def test_health_reports_not_loaded_when_model_missing(monkeypatch):
     ):
         mock_wx.return_value = {"stale_features": True}
         mock_drift.return_value = {"drift_warning": False, "drift_level": "none", "max_psi": 0.0, "psi_scores": {}}
-        # Force re-import to pick up the missing model path
+        # Reload serving.model to reset _model + re-read PICKLE_MODEL_PATH from env
         import importlib
 
+        import serving.model
+        importlib.reload(serving.model)
         import serving.app
         importlib.reload(serving.app)
         from serving.app import app

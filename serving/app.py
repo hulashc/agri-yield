@@ -675,8 +675,6 @@ def health() -> dict:
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
         "fields_loaded": not _FIELDS_DF.empty,
-        "model_path": os.environ.get("PICKLE_MODEL_PATH", "NOT_SET"),
-        "model_path_loaded": model_module.get_pickle_path(),
     }
 
 
