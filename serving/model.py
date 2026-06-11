@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import pickle
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -30,13 +31,14 @@ _lower_model = None    # 10th-percentile quantile model
 _upper_model = None    # 90th-percentile quantile model
 _model_version: str = "not_loaded"
 _bundle_meta: dict = {}
+_using_bundle: bool = False
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
 def _load_bundle(path: str) -> bool:
     """Load mean + lower + upper models from model_bundle.pkl."""
-    global _model, _lower_model, _upper_model, _model_version, _bundle_meta
+    global _model, _lower_model, _upper_model, _model_version, _bundle_meta, _using_bundle
     p = Path(path)
     if not p.exists():
         log.info("Bundle not found at %s", p)
@@ -47,11 +49,13 @@ def _load_bundle(path: str) -> bool:
         _model = bundle["mean_model"]
         _lower_model = bundle.get("lower_model")
         _upper_model = bundle.get("upper_model")
+        # Strip models from meta, keep scalar metadata only
         _bundle_meta = {
             k: v for k, v in bundle.items()
             if k not in ("mean_model", "lower_model", "upper_model")
         }
-        _model_version = "bundle-ci"
+        _using_bundle = True
+        _model_version = _bundle_meta.get("model_version", "bundle-ci")
         log.info(
             "Loaded model bundle — CI coverage %.1f%%, avg width %.0f kg/ha",
             bundle.get("coverage_80pct", 0) * 100,
@@ -65,7 +69,7 @@ def _load_bundle(path: str) -> bool:
 
 def _load_from_mlflow() -> bool:
     """Try MLflow registry. Returns False immediately if MLFLOW_TRACKING_URI=disabled."""
-    global _model, _model_version
+    global _model, _model_version, _using_bundle
     if MLFLOW_TRACKING_URI == "disabled":
         log.info("MLflow disabled via env — skipping.")
         return False
@@ -81,7 +85,8 @@ def _load_from_mlflow() -> bool:
         _model_version = version.version
         model_uri = f"models:/{REGISTERED_MODEL_NAME}@{MODEL_ALIAS}"
         _model = mlflow.xgboost.load_model(model_uri, dst_path=MODEL_CACHE_PATH)
-        log.info("Loaded mean model from MLflow v%s (no quantile bundle via MLflow)", _model_version)
+        _using_bundle = False
+        log.info("Loaded mean model from MLflow v%s (no quantile bundle)", _model_version)
         return True
     except Exception as exc:
         log.info("MLflow unavailable (%s) — falling back.", exc)
@@ -90,13 +95,14 @@ def _load_from_mlflow() -> bool:
 
 def _load_from_pickle() -> bool:
     """Load model.pkl baked into the Docker image by CI (mean model only)."""
-    global _model, _model_version
+    global _model, _model_version, _using_bundle
     pkl_path = Path(PICKLE_MODEL_PATH)
     log.info("Trying pickle at: %s (exists=%s)", pkl_path, pkl_path.exists())
     try:
         with open(pkl_path, "rb") as f:
             _model = pickle.load(f)  # noqa: S301
         _model_version = "pkl-ci"
+        _using_bundle = False
         log.info("Loaded mean model from pickle: %s", pkl_path)
         return True
     except Exception as exc:
@@ -125,6 +131,16 @@ def is_loaded() -> bool:
     return _model is not None
 
 
+def using_bundle() -> bool:
+    """True when model_bundle.pkl was successfully loaded (real quantile CIs active)."""
+    return _using_bundle
+
+
+def has_quantile_models() -> bool:
+    """True when lower/upper quantile models are available."""
+    return _lower_model is not None and _upper_model is not None
+
+
 def get_model():
     if _model is None:
         raise RuntimeError("model_not_ready")
@@ -132,13 +148,8 @@ def get_model():
 
 
 def get_bundle_meta() -> dict:
-    """Return metadata saved alongside the model bundle (coverage, width, etc.)."""
+    """Return metadata saved alongside the model bundle."""
     return _bundle_meta
-
-
-def has_quantile_models() -> bool:
-    """True when lower/upper quantile models are available."""
-    return _lower_model is not None and _upper_model is not None
 
 
 NON_FEATURE_COLS = ["field_id", "event_timestamp"]

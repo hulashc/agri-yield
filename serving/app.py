@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,9 +27,11 @@ from monitoring.prometheus_metrics import (
     STALE_FEATURE_REQUESTS,
 )
 from monitoring.psi_detector import evaluate_drift
+from monitoring.reference_cache import load_all_reference_distributions
+from serving.explainability import get_global_importance, get_local_explanation
 from serving.metrics import metrics_router
 from serving.model import load_model
-from serving.schemas import ModelInfoResponse, PredictRequest
+from serving.schemas import ExplainRequest, ExplainResponse, ModelInfoResponse, PredictRequest
 from serving.version import BUILD_VERSION
 
 log = logging.getLogger(__name__)
@@ -47,7 +49,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 async def _startup_load():
-    """Load CSV + model in the background so the port binds immediately."""
+    """Load CSV + model + reference cache in the background so the port binds immediately."""
     global _FIELDS_DF
     try:
         log.info("Loading fields from: %s", FIELDS_CSV_PATH)
@@ -64,6 +66,15 @@ async def _startup_load():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _startup_load()
+    # Load all NASA POWER reference distributions once — avoids per-request Parquet scan.
+    loop = asyncio.get_running_loop()
+    app.state.reference_cache = await loop.run_in_executor(
+        None, load_all_reference_distributions
+    )
+    log.info(
+        "Reference cache loaded: %d features",
+        sum(1 for v in app.state.reference_cache.values() if len(v) > 0),
+    )
     yield
 
 
@@ -102,7 +113,7 @@ def get_field_meta(field_id: str) -> dict:
     return _FIELDS_DF.loc[field_id].to_dict()
 
 
-async def _predict_one(field_id: str, row: pd.Series) -> dict:
+async def _predict_one(field_id: str, row: pd.Series, reference_cache: dict) -> dict:
     """Run a single field prediction — used by bulk /fields endpoint."""
     async with _PREDICT_SEMAPHORE:
         try:
@@ -115,7 +126,7 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 float(row["lon"]),
             )
             features = {**row.to_dict(), **live}
-            drift_result = evaluate_drift(field_id, features)
+            drift_result = evaluate_drift(field_id, features, reference_cache=reference_cache)
             feat_df = pd.DataFrame([features])
             preds, lower, upper = model_module.predict(feat_df)
             return {
@@ -130,7 +141,12 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "predicted_yield_kg_ha": round(float(preds[0]), 1),
                 "lower_bound": round(float(lower[0]), 1),
                 "upper_bound": round(float(upper[0]), 1),
-                "confidence_method": "xgboost_quantile_regression" if model_module.using_bundle() else "legacy_symmetric_ci",
+                "confidence_level": 0.80,
+                "confidence_method": (
+                    "xgboost_quantile_regression"
+                    if model_module.using_bundle()
+                    else "legacy_symmetric_ci"
+                ),
                 "drift_warning": drift_result["drift_warning"],
                 "drift_level": drift_result["drift_level"],
                 "stale_features": live.get("stale_features", False),
@@ -153,6 +169,7 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "predicted_yield_kg_ha": None,
                 "lower_bound": None,
                 "upper_bound": None,
+                "confidence_level": None,
                 "confidence_method": None,
                 "drift_warning": False,
                 "drift_level": "none",
@@ -164,8 +181,12 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
             }
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
 @app.get("/fields")
-async def bulk_fields():
+async def bulk_fields(request: Request):
     """Return all fields with live predictions — powers the map UI."""
     if _FIELDS_DF.empty:
         raise HTTPException(
@@ -178,7 +199,11 @@ async def bulk_fields():
             detail="Model not loaded yet — please retry in a moment.",
         )
 
-    tasks = [_predict_one(fid, row) for fid, row in _FIELDS_DF.iterrows()]
+    reference_cache = getattr(request.app.state, "reference_cache", {})
+    tasks = [
+        _predict_one(fid, row, reference_cache)
+        for fid, row in _FIELDS_DF.iterrows()
+    ]
     try:
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=90.0)
     except TimeoutError:
@@ -190,24 +215,88 @@ async def bulk_fields():
 @app.get("/model/info", response_model=ModelInfoResponse)
 def model_info() -> ModelInfoResponse:
     """
-    Return model card: training metadata, feature importance, CI method.
-    Useful for explainability dashboards and competition judges.
+    Return model card: training metadata, CI method, feature importance.
+    Surfaces the quantile coverage, interval width, and top predictive features
+    so judges and stakeholders can understand the model without code access.
     """
+    if not model_module.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+
     meta = model_module.get_bundle_meta()
     return ModelInfoResponse(
-        model_version=meta.get("model_version", "unknown"),
-        confidence_method=meta.get("confidence_method", "unknown"),
-        using_bundle=meta.get("using_bundle", False),
+        model_version=meta.get("model_version", model_module.model_version()),
+        confidence_method=(
+            "xgboost_quantile_regression"
+            if model_module.using_bundle()
+            else "legacy_symmetric_ci"
+        ),
+        using_bundle=model_module.using_bundle(),
         trained_at=meta.get("trained_at"),
-        rmse_kg_ha=meta.get("rmse_kg_ha"),
-        mae_kg_ha=meta.get("mae_kg_ha"),
-        pi_coverage_pct=meta.get("pi_coverage_pct"),
-        interval_label=meta.get("interval_label"),
-        split_policy=meta.get("split_policy"),
+        rmse_kg_ha=meta.get("holdout_rmse"),
+        mae_kg_ha=meta.get("holdout_mae"),
+        pi_coverage_pct=(
+            round(meta["coverage_80pct"] * 100, 1)
+            if meta.get("coverage_80pct") is not None
+            else None
+        ),
+        interval_label=(
+            f"Q{int(meta['quantile_lower'] * 100)}–Q{int(meta['quantile_upper'] * 100)}"
+            if meta.get("quantile_lower") is not None
+            else None
+        ),
+        split_policy=meta.get("split_policy", "temporal_train_test_split"),
         n_train=meta.get("n_train"),
         n_test=meta.get("n_test"),
-        top_features=meta.get("top_features", []),
-        warning=meta.get("warning"),
+        top_features=meta.get("top_features", get_global_importance(top_n=10)),
+        warning=(
+            None
+            if model_module.using_bundle()
+            else "Bundle not loaded — using legacy CI. Re-train to generate model_bundle.pkl."
+        ),
+    )
+
+
+@app.post("/predict/explain", response_model=ExplainResponse)
+async def predict_explain(body: ExplainRequest, request: Request):
+    """
+    Return a local SHAP explanation for a single field prediction.
+
+    Given a field_id, fetches live weather features, runs the mean model,
+    and returns the top SHAP contributors that drove the prediction up or down
+    from the model's baseline expectation.
+
+    Use this endpoint to power explainability panels in the dashboard
+    or to answer 'why is this field predicted to yield X kg/ha?'
+    """
+    if not model_module.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+
+    field_meta = get_field_meta(body.field_id)
+
+    async with _PREDICT_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        live = await loop.run_in_executor(
+            None,
+            get_live_features,
+            body.field_id,
+            float(field_meta["lat"]),
+            float(field_meta["lon"]),
+        )
+
+    features = {**field_meta, **live}
+    feat_df = pd.DataFrame([features])
+
+    explanation = get_local_explanation(feat_df, top_n=body.top_n)
+
+    return ExplainResponse(
+        field_id=body.field_id,
+        prediction=explanation.get("prediction", 0.0),
+        base_value=explanation.get("base_value"),
+        top_contributors=explanation.get("top_contributors", []),
+        source=explanation.get("source", "unknown"),
+        error=explanation.get("error"),
+        model_version=model_module.model_version(),
+        last_updated=datetime.now(UTC).isoformat(),
     )
 
 
@@ -228,35 +317,37 @@ def health() -> dict:
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
         "using_bundle": model_module.using_bundle(),
+        "has_quantile_models": model_module.has_quantile_models(),
         "fields_loaded": not _FIELDS_DF.empty,
     }
 
 
 @app.post("/predict")
-async def predict(request: PredictRequest) -> dict:
+async def predict(body: PredictRequest, request: Request) -> dict:
     if not model_module.is_loaded():
         raise HTTPException(
             status_code=503, detail="Model not loaded yet — please retry in a moment."
         )
 
     start = time.time()
-    field_meta = get_field_meta(request.field_id)
+    field_meta = get_field_meta(body.field_id)
 
     async with _PREDICT_SEMAPHORE:
         loop = asyncio.get_running_loop()
         live = await loop.run_in_executor(
             None,
             get_live_features,
-            request.field_id,
+            body.field_id,
             float(field_meta["lat"]),
             float(field_meta["lon"]),
         )
 
     if live.get("stale_features"):
-        STALE_FEATURE_REQUESTS.labels(field_id=request.field_id).inc()
+        STALE_FEATURE_REQUESTS.labels(field_id=body.field_id).inc()
 
     features = {**field_meta, **live}
-    drift_result = evaluate_drift(request.field_id, features)
+    reference_cache = getattr(request.app.state, "reference_cache", {})
+    drift_result = evaluate_drift(body.field_id, features, reference_cache=reference_cache)
     feat_df = pd.DataFrame([features])
     preds, lower, upper = model_module.predict(feat_df)
 
@@ -278,12 +369,16 @@ async def predict(request: PredictRequest) -> dict:
     PREDICTION_CI_WIDTH.observe(prediction["upper"] - prediction["lower"])
 
     return {
-        "field_id": request.field_id,
+        "field_id": body.field_id,
         "predicted_yield_kg_ha": prediction["mean"],
         "lower_bound": prediction["lower"],
         "upper_bound": prediction["upper"],
         "confidence_level": 0.80,
-        "confidence_method": "xgboost_quantile_regression" if model_module.using_bundle() else "legacy_symmetric_ci",
+        "confidence_method": (
+            "xgboost_quantile_regression"
+            if model_module.using_bundle()
+            else "legacy_symmetric_ci"
+        ),
         "drift_warning": drift_result["drift_warning"],
         "drift_level": drift_result["drift_level"],
         "psi_score": drift_result["max_psi"],

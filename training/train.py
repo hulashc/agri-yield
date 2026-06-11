@@ -5,13 +5,15 @@ Trains three models:
   - lower model (XGBRegressor, quantile alpha=0.10)
   - upper model (XGBRegressor, quantile alpha=0.90)
 
-Saves a model_bundle.pkl alongside model.pkl so serving can return
-statistically-derived prediction intervals instead of a hardcoded fraction.
+Saves model_bundle.pkl with full metadata so /model/info can surface:
+  training timestamp, RMSE/MAE, CI coverage, interval width, top features,
+  split policy, n_train, n_test.
 """
 
 import argparse
 import os
 import pickle
+from datetime import UTC, datetime
 from pathlib import Path
 
 import mlflow
@@ -82,6 +84,9 @@ def train(
     X_test = test_df[feature_cols]
     y_test = test_df[TARGET]
 
+    n_train = len(X_train)
+    n_test = len(X_test)
+
     # ── Cross-validation on mean model ──────────────────────────────────────
     tscv = TimeSeriesSplit(n_splits=n_cv_folds)
     cv_rmse_scores, cv_mae_scores, cv_r2_scores = [], [], []
@@ -107,6 +112,18 @@ def train(
     mean_model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
     test_preds = mean_model.predict(X_test)
     holdout_metrics = compute_metrics(y_test.values, test_preds)
+
+    # ── Global feature importance (XGBoost gain, top 15) ────────────────────
+    importances = mean_model.feature_importances_
+    top_features = sorted(
+        [
+            {"rank": i + 1, "feature": name, "importance": round(float(imp), 6), "source": "xgboost_gain"}
+            for i, (name, imp) in enumerate(
+                sorted(zip(feature_cols, importances), key=lambda x: x[1], reverse=True)[:15]
+            )
+        ],
+        key=lambda x: x["rank"],
+    )
 
     # ── Train quantile models (10th and 90th percentile) ─────────────────────
     lower_params = _build_quantile_params(params, alpha=0.10)
@@ -134,17 +151,28 @@ def train(
     test_df_copy["_pred"] = test_preds
     per_crop_metrics = compute_metrics_by_crop(test_df_copy, TARGET, "_pred")
 
-    # ── Save model bundle ─────────────────────────────────────────────────────
+    # ── Save model bundle (enriched metadata for /model/info) ─────────────────
+    trained_at = datetime.now(UTC).isoformat()
     bundle = {
         "mean_model": mean_model,
         "lower_model": lower_model,
         "upper_model": upper_model,
+        # — Metadata surfaced by /model/info —
+        "model_version": f"bundle-{trained_at[:10]}",
+        "trained_at": trained_at,
+        "split_policy": "temporal_train_test_split",
+        "n_train": n_train,
+        "n_test": n_test,
         "feature_cols": feature_cols,
-        "holdout_rmse": holdout_metrics["rmse"],
-        "coverage_80pct": coverage,
-        "avg_interval_width_kg_ha": avg_interval_width,
+        "holdout_rmse": round(holdout_metrics["rmse"], 4),
+        "holdout_mae": round(holdout_metrics["mae"], 4),
+        "holdout_r2": round(holdout_metrics["r2"], 4),
+        "coverage_80pct": round(coverage, 4),
+        "avg_interval_width_kg_ha": round(avg_interval_width, 1),
         "quantile_lower": 0.10,
         "quantile_upper": 0.90,
+        "top_features": top_features,
+        "dvc_commit": dvc_commit,
     }
     with open(BUNDLE_PATH, "wb") as f:
         pickle.dump(bundle, f)
@@ -152,9 +180,13 @@ def train(
     with open(PICKLE_PATH, "wb") as f:
         pickle.dump(mean_model, f)
 
-    print(f"Model bundle saved to {BUNDLE_PATH}")
+    print(f"\nModel bundle saved to {BUNDLE_PATH}")
+    print(f"Trained at:            {trained_at}")
+    print(f"n_train={n_train}  n_test={n_test}")
+    print(f"Holdout RMSE:          {holdout_metrics['rmse']:.4f} kg/ha")
+    print(f"Holdout MAE:           {holdout_metrics['mae']:.4f} kg/ha")
     print(f"CI coverage (80% band): {coverage:.1%}")
-    print(f"Avg interval width: {avg_interval_width:.1f} kg/ha")
+    print(f"Avg interval width:    {avg_interval_width:.1f} kg/ha")
 
     # ── MLflow logging ───────────────────────────────────────────────────────
     with mlflow.start_run(run_name="xgboost_quantile_run") as run:
@@ -164,6 +196,10 @@ def train(
         mlflow.log_param("feature_count", len(feature_cols))
         mlflow.log_param("quantile_lower", 0.10)
         mlflow.log_param("quantile_upper", 0.90)
+        mlflow.log_param("n_train", n_train)
+        mlflow.log_param("n_test", n_test)
+        mlflow.log_param("split_policy", "temporal_train_test_split")
+        mlflow.log_param("trained_at", trained_at)
 
         for i, (rmse, mae, r2) in enumerate(zip(cv_rmse_scores, cv_mae_scores, cv_r2_scores)):
             mlflow.log_metric(f"cv_fold_{i}_rmse", rmse)
@@ -200,7 +236,6 @@ def train(
         )
         print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → alias=challenger")
         print(f"Run ID: {run_id}")
-        print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")
         return run_id, holdout_metrics
 
 

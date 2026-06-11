@@ -29,8 +29,10 @@ class PredictResponse(BaseModel):
 
 
 class FeatureImportanceItem(BaseModel):
+    rank: int
     feature: str
     importance: float
+    source: str = "shap"
 
 
 class ModelInfoResponse(BaseModel):
@@ -47,6 +49,37 @@ class ModelInfoResponse(BaseModel):
     n_test: int | None = None
     top_features: list[dict[str, Any]] = Field(default_factory=list)
     warning: str | None = None
+
+
+class ExplainRequest(BaseModel):
+    field_id: str = Field(..., min_length=1, max_length=64)
+    top_n: int = Field(default=10, ge=1, le=len([].__class__.mro()), description="Number of top SHAP contributors to return")
+
+
+class ContributorItem(BaseModel):
+    feature: str
+    shap_value: float
+    feature_value: float
+    direction: str  # "positive" | "negative"
+
+
+class ExplainResponse(BaseModel):
+    field_id: str
+    prediction: float = Field(description="Mean model prediction in kg/ha")
+    base_value: float | None = Field(
+        default=None,
+        description="SHAP base value (expected model output before feature adjustments)",
+    )
+    top_contributors: list[ContributorItem] = Field(
+        default_factory=list,
+        description="Top features driving this prediction, ranked by |SHAP value|",
+    )
+    source: str = Field(
+        description="'shap' when SHAP is available, 'xgboost_gain_fallback' otherwise"
+    )
+    error: str | None = None
+    model_version: str
+    last_updated: str
 
 
 class BatchPredictRequest(BaseModel):
