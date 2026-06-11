@@ -1,0 +1,65 @@
+name: Retrain Trigger
+
+# Triggered manually from GitHub Actions UI, or programmatically via the
+# GitHub API when drift goes red (POST to /repos/{owner}/{repo}/actions/workflows/retrain-trigger.yml/dispatches)
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for retraining (e.g. drift_red, manual, scheduled)"
+        required: false
+        default: "manual"
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: Run training
+        run: uv run python training/train_and_export.py
+
+      - name: Quality gate (RMSE + quantile CI)
+        run: |
+          uv run python - <<'EOF'
+          import pickle, sys
+          with open("model_bundle.pkl", "rb") as f:
+              b = pickle.load(f)
+          rmse = b.get("rmse", float("inf"))
+          has_ci = "lower" in b and "upper" in b
+          source = b.get("dataset_source", "unknown")
+          print(f"RMSE={rmse:.1f} source={source} has_quantile_ci={has_ci}")
+          if rmse >= 2000:
+              print(f"FAIL: RMSE {rmse:.1f} >= 2000 kg/ha gate")
+              sys.exit(1)
+          if not has_ci:
+              print("FAIL: model_bundle.pkl missing lower/upper quantile models")
+              sys.exit(1)
+          print("Quality gate PASSED")
+          EOF
+
+      - name: Commit updated model artefacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add model_bundle.pkl model.pkl
+          git diff --staged --quiet && echo "No model changes to commit" || \
+            git commit -m "chore(model): retrain [reason=${{ github.event.inputs.reason }}] [skip ci]"
+          git push
