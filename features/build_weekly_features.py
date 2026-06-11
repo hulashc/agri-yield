@@ -91,7 +91,9 @@ def aggregate_to_weekly(df: pd.DataFrame, field_id: str) -> pd.DataFrame:
         wind_speed_mean=("WS2M", "mean"),
     ).reset_index()
 
-    # Soil proxies — derived from weather (no sensor data yet)
+    # Soil proxies — derived from weather (no sensor data yet).
+    # Use .assign() with explicit typed scalars to avoid pandas __setitem__
+    # overload ambiguity that mypy cannot resolve for str-keyed scalar assignment.
     agg = agg.assign(
         soil_temp_mean=agg["air_temp_mean"] * 0.85,
         soil_temp_std=agg["air_temp_std"].fillna(0) * 0.85,
@@ -109,6 +111,8 @@ def aggregate_to_weekly(df: pd.DataFrame, field_id: str) -> pd.DataFrame:
         ndvi_proxied=int(1),
     )
 
+    # Cast meta values to concrete types before using as dict keys / BASE_YIELD index.
+    # FIELD_META values are typed as object; str() / float() narrow them for mypy.
     meta = FIELD_META[field_id]
     crop_type: str = str(meta["crop_type"])
     region: str = str(meta["region"])
@@ -124,7 +128,7 @@ def aggregate_to_weekly(df: pd.DataFrame, field_id: str) -> pd.DataFrame:
     )
 
     # Synthetic yield label based on growing season weather
-    base = BASE_YIELD[crop_type]
+    base: int = BASE_YIELD[crop_type]
     rng = np.random.default_rng(seed=abs(hash(field_id)) % (2**32))
     noise = rng.normal(0, base * 0.08, len(agg))
     temp_effect = (agg["air_temp_mean"] - 10).clip(-5, 15) * (base * 0.005)

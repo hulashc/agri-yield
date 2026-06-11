@@ -25,6 +25,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
 
 from monitoring.prometheus_metrics import DRIFT_LEVEL, DRIFT_WARNINGS_TOTAL, PSI_SCORE
@@ -52,7 +53,7 @@ _live_buffer: dict[str, dict[str, list[float]]] = {}
 BUFFER_SIZE = 500
 
 
-def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray:  # type: ignore[type-arg]
+def _append_to_buffer(field_id: str, feature: str, value: float) -> NDArray[np.float64]:
     """Append a live value to the rolling buffer and return the current window."""
     _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
     buf = _live_buffer[field_id][feature]
@@ -62,7 +63,7 @@ def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray: 
     return np.array(buf, dtype=float)
 
 
-def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) -> float:  # type: ignore[type-arg]
+def compute_psi(reference: NDArray[np.float64], current: NDArray[np.float64], n_bins: int = 10) -> float:
     """
     Compute Population Stability Index between two distributions.
 
@@ -85,11 +86,11 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) ->
     breakpoints = np.percentile(reference, np.linspace(0, 100, n_bins + 1))
     breakpoints = np.unique(breakpoints)
 
-    def safe_pct(arr: np.ndarray, bins: np.ndarray) -> np.ndarray:  # type: ignore[type-arg]
+    def safe_pct(arr: NDArray[np.float64], bins: NDArray[np.float64]) -> NDArray[np.float64]:
         counts, _ = np.histogram(arr, bins=bins)
         pct = counts / len(arr)
         pct = np.where(pct == 0, 1e-4, pct)
-        return pct  # type: ignore[return-value]
+        return np.asarray(pct, dtype=float)
 
     ref_pct = safe_pct(reference, breakpoints)
     cur_pct = safe_pct(current, breakpoints)
@@ -104,7 +105,7 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) ->
 
 def load_reference_distribution(
     feature: str, data_root: str = "data/raw/nasa_power"
-) -> np.ndarray:  # type: ignore[type-arg]
+) -> NDArray[np.float64]:
     """
     Load the reference distribution for a feature from saved Parquet files.
 
@@ -138,14 +139,15 @@ def load_reference_distribution(
         return np.array([], dtype=float)
 
     combined = pd.concat(dfs)
-    # Cast explicitly to np.ndarray to satisfy mypy return-value check
-    return np.asarray(combined[col].dropna().values, dtype=float)
+    # .to_numpy() always returns a plain np.ndarray (no ExtensionArray union),
+    # which satisfies the NDArray[np.float64] return type for mypy.
+    return np.asarray(combined[col].dropna().to_numpy(dtype=float))
 
 
 def evaluate_drift(
     field_id: str,
     live_features: dict[str, object],
-    reference_cache: dict[str, np.ndarray] | None = None,  # type: ignore[type-arg]
+    reference_cache: dict[str, NDArray[np.float64]] | None = None,
 ) -> dict[str, object]:
     """
     Run PSI for each monitored feature using a rolling buffer of live values.

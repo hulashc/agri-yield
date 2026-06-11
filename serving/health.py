@@ -35,8 +35,9 @@ def check_materialization_age() -> bool:
         ts_bytes = r.get("feast:last_materialization_ts")
         if not ts_bytes:
             return False
-        # r.get() returns bytes in the sync redis client.
-        # Narrow the type explicitly before decode() so mypy is satisfied.
+        # r.get() on the sync redis client returns bytes | None.
+        # Narrow to bytes before calling .decode() so mypy is satisfied
+        # (without this guard, mypy sees Awaitable[Any] | Any from overload ambiguity).
         if isinstance(ts_bytes, bytes):
             raw: str = ts_bytes.decode("utf-8")
         else:

@@ -15,9 +15,11 @@ def run_training() -> str:
     logger.info("Starting model training")
 
     try:
-        from training.train import train_model
+        # The public entry point in training/train.py is called `train`, not `train_model`.
+        # Import it under the alias train_model to avoid renaming call sites.
+        from training.train import train as train_model
 
-        run_id = train_model()
+        run_id, _ = train_model()
         logger.info(f"Training complete. MLflow run_id: {run_id}")
         return run_id
     except Exception as exc:

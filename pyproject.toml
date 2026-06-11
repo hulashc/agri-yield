@@ -86,6 +86,8 @@ module = [
     "shapely.*",
     "pystac_client.*",
     "grafana_api.*",
+    # Internal monitoring module without py.typed marker
+    "monitoring.drift_report",
 ]
 ignore_missing_imports = true
 
