@@ -12,28 +12,57 @@ from training.utils.features import FEATURE_COLS
 TARGET = "yield_kg_per_ha"
 
 
-def _train_toy_model() -> bytes:
-    rng = np.random.default_rng(42)
+def _make_bundle(rng=None) -> dict:
+    """Build a real 3-model bundle (mean + lower + upper) for tests."""
+    if rng is None:
+        rng = np.random.default_rng(42)
     n = 500
-    rows = []
-    for i in range(n):
-        rows.append({col: float(rng.random()) for col in FEATURE_COLS})
+    rows = [{col: float(rng.random()) for col in FEATURE_COLS} for _ in range(n)]
     df = pd.DataFrame(rows)
     df[TARGET] = df["lat"] * 2000 + df["precipitation_sum"] * 300 + rng.normal(0, 200, n)
-    model = xgb.XGBRegressor(n_estimators=50, max_depth=4, random_state=42)
-    model.fit(df[FEATURE_COLS], df[TARGET])
-    return pickle.dumps(model)
+    base = dict(n_estimators=50, max_depth=4, random_state=42)
+    mean_m = xgb.XGBRegressor(**base)
+    mean_m.fit(df[FEATURE_COLS], df[TARGET])
+    lower_m = xgb.XGBRegressor(**base, objective="reg:quantileerror", quantile_alpha=0.10)
+    lower_m.fit(df[FEATURE_COLS], df[TARGET])
+    upper_m = xgb.XGBRegressor(**base, objective="reg:quantileerror", quantile_alpha=0.90)
+    upper_m.fit(df[FEATURE_COLS], df[TARGET])
+    importance = {
+        feat: float(score)
+        for feat, score in zip(FEATURE_COLS, mean_m.feature_importances_, strict=False)
+    }
+    return {
+        "mean": mean_m,
+        "lower": lower_m,
+        "upper": upper_m,
+        "rmse": 450.0,
+        "feature_importance": importance,
+        "trained_at": "2026-06-11T00:00:00+00:00",
+        "dataset_source": "synthetic",
+        "feature_cols": FEATURE_COLS,
+        "quantile_lower": 0.10,
+        "quantile_upper": 0.90,
+        "ci_coverage": "80%",
+        "ordering_violations": 0,
+    }
 
 
 @pytest.fixture(scope="session")
-def toy_model_bytes() -> bytes:
-    return _train_toy_model()
+def toy_bundle() -> dict:
+    """Session-scoped 3-model bundle — built once, reused across all tests."""
+    return _make_bundle()
+
+
+@pytest.fixture(scope="session")
+def toy_model_bytes(toy_bundle) -> bytes:
+    """Legacy bytes fixture kept for backward compat with test_splits etc."""
+    return pickle.dumps(toy_bundle["mean"])
 
 
 @pytest.fixture(autouse=True)
 def env_setup(monkeypatch, tmp_path):
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "disabled")
-    monkeypatch.setenv("REDIS_URL", "")
+    monkeypatch.setenv("REDIS_URL", "")  # disable Redis in tests — use in-memory fallback
 
     small_fields = pd.DataFrame({
         "field_id": ["F001", "F002", "F003"],
@@ -51,15 +80,26 @@ def env_setup(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def model_pkl_path(monkeypatch, toy_model_bytes, tmp_path) -> str:
-    pkl = tmp_path / "model.pkl"
-    pkl.write_bytes(toy_model_bytes)
-    monkeypatch.setenv("PICKLE_MODEL_PATH", str(pkl))
-    return str(pkl)
+def model_bundle_path(monkeypatch, toy_bundle, tmp_path) -> str:
+    """Write bundle to tmp_path and point env vars at it."""
+    bundle_path = tmp_path / "model_bundle.pkl"
+    bundle_path.write_bytes(pickle.dumps(toy_bundle))
+    monkeypatch.setenv("PICKLE_BUNDLE_PATH", str(bundle_path))
+    # Also write legacy pkl for any code that still reads model.pkl
+    pkl_path = tmp_path / "model.pkl"
+    pkl_path.write_bytes(pickle.dumps(toy_bundle["mean"]))
+    monkeypatch.setenv("PICKLE_MODEL_PATH", str(pkl_path))
+    return str(bundle_path)
 
 
 @pytest.fixture
-def app(model_pkl_path):
+def model_pkl_path(model_bundle_path) -> str:
+    """Alias kept for tests that depend on the old fixture name."""
+    return model_bundle_path
+
+
+@pytest.fixture
+def app(model_bundle_path):
     """Build a FastAPI test app with mocked weather and drift.
 
     Patches are applied BEFORE importing serving.app so the import

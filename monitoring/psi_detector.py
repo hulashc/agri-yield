@@ -6,12 +6,18 @@ Compares live request feature distributions against a reference
 distribution built from NASA POWER historical data.
 
 PSI < 0.25  → green  (no action)
-PSI 0.25–0.50 → amber  (log warning)
+PSI 0.25-0.50 → amber  (log warning)
 PSI > 0.50  → red    (trigger retraining)
 
 Note: thresholds are intentionally wider than the classic 0.10/0.20
 because training data uses synthetic/proxy values. PSI is only meaningful
 once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
+
+Buffer persistence:
+  Live feature values are persisted in Redis (key prefix drift:buf:<field>:<feature>)
+  so drift state survives container restarts and redeployments.
+  If REDIS_URL is unset or Redis is unreachable, the detector falls back to an
+  in-memory dict silently — monitoring still works, just resets on restart.
 
 Performance note:
   load_reference_distribution() reads all NASA POWER Parquet files from disk.
@@ -22,6 +28,7 @@ Performance note:
 """
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -48,13 +55,79 @@ MONITORED_FEATURES = [
     "ndvi_latest",
 ]
 
-# Rolling buffer: field_id → feature → list of recent values
-_live_buffer: dict[str, dict[str, list[float]]] = {}
+# ---------------------------------------------------------------------------
+# Redis-backed rolling buffer
+# ---------------------------------------------------------------------------
+
 BUFFER_SIZE = 500
+REDIS_KEY_PREFIX = "drift:buf:"
+REDIS_TTL_SECONDS = 86400 * 7  # 7 days — keeps drift history across deploys
+
+# In-memory fallback — used when Redis is unavailable
+_live_buffer: dict[str, dict[str, list[float]]] = {}
+
+# Cached Redis client — None means "not yet attempted" or "unavailable"
+_redis_client = None
+_redis_attempted = False
+
+
+def _get_redis():
+    """
+    Return a connected Redis client, or None if Redis is not configured
+    or is unreachable.
+
+    The connection is attempted once and then cached.
+    If Redis goes down mid-run, individual buffer writes will catch the
+    exception and fall back to in-memory for that call.
+    """
+    global _redis_client, _redis_attempted
+    if _redis_attempted:
+        return _redis_client
+    _redis_attempted = True
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if not redis_url:
+        logger.info("REDIS_URL not set — drift buffer will use in-memory fallback.")
+        return None
+    try:
+        import redis as redis_lib  # noqa: PLC0415
+        client = redis_lib.from_url(redis_url, socket_connect_timeout=2, decode_responses=False)
+        client.ping()
+        _redis_client = client
+        logger.info("Drift buffer: Redis connected (%s)", redis_url.split("@")[-1])
+        return _redis_client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Redis unavailable (%s) — drift buffer will use in-memory fallback.", exc
+        )
+        return None
 
 
 def _append_to_buffer(field_id: str, feature: str, value: float) -> NDArray[np.float64]:
-    """Append a live value to the rolling buffer and return the current window."""
+    """
+    Append a live value to the rolling buffer and return the current window.
+
+    Persistence hierarchy:
+    1. Redis (survives restarts) — used when REDIS_URL is set and reachable
+    2. In-memory dict (resets on restart) — fallback when Redis is unavailable
+    """
+    r = _get_redis()
+    key = f"{REDIS_KEY_PREFIX}{field_id}:{feature}"
+
+    if r is not None:
+        try:
+            r.rpush(key, value)
+            r.ltrim(key, -BUFFER_SIZE, -1)
+            r.expire(key, REDIS_TTL_SECONDS)
+            raw = r.lrange(key, 0, -1)
+            return np.array([float(v) for v in raw], dtype=float)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Redis buffer write failed for %s/%s (%s) — using in-memory.",
+                field_id, feature, exc,
+            )
+            # Fall through to in-memory
+
+    # In-memory fallback
     _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
     buf = _live_buffer[field_id][feature]
     buf.append(value)
@@ -63,11 +136,15 @@ def _append_to_buffer(field_id: str, feature: str, value: float) -> NDArray[np.f
     return np.array(buf, dtype=float)
 
 
-def compute_psi(reference: NDArray[np.float64], current: NDArray[np.float64], n_bins: int = 10) -> float:
+def compute_psi(
+    reference: NDArray[np.float64],
+    current: NDArray[np.float64],
+    n_bins: int = 10,
+) -> float:
     """
     Compute Population Stability Index between two distributions.
 
-    PSI = Σ (actual% - expected%) × ln(actual% / expected%)
+    PSI = Sum( (actual% - expected%) * ln(actual% / expected%) )
 
     Args:
         reference: Array of reference distribution values (training period)
@@ -75,7 +152,8 @@ def compute_psi(reference: NDArray[np.float64], current: NDArray[np.float64], n_
         n_bins:    Number of histogram bins
 
     Returns:
-        PSI score (float). Higher = more drift.
+        PSI score (float). Higher = more drift. Returns 0.0 if either
+        array has insufficient samples.
     """
     reference = reference[~np.isnan(reference)]
     current = current[~np.isnan(current)]
@@ -139,8 +217,6 @@ def load_reference_distribution(
         return np.array([], dtype=float)
 
     combined = pd.concat(dfs)
-    # .to_numpy() always returns a plain np.ndarray (no ExtensionArray union),
-    # which satisfies the NDArray[np.float64] return type for mypy.
     return np.asarray(combined[col].dropna().to_numpy(dtype=float))
 
 
@@ -153,10 +229,13 @@ def evaluate_drift(
     Run PSI for each monitored feature using a rolling buffer of live values.
     Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
 
+    The rolling buffer is persisted in Redis when available, so drift history
+    survives container restarts and redeployments.
+
     Args:
         field_id: Unique field identifier for per-field buffer tracking.
-        live_features: Dict of feature name → live value from the request.
-        reference_cache: Pre-loaded reference distributions (dict of feature → np.ndarray).
+        live_features: Dict of feature name to live value from the request.
+        reference_cache: Pre-loaded reference distributions (dict of feature to np.ndarray).
                          Should be populated at app startup via _warm_reference_cache().
                          If None, falls back to per-call disk reads (slow — avoid in production).
     """
@@ -183,7 +262,6 @@ def evaluate_drift(
         if reference_cache is not None:
             ref = reference_cache.get(feature)
         else:
-            # Fallback: per-request disk read (slow path — startup cache not available)
             ref = load_reference_distribution(feature)
 
         if ref is None or len(ref) == 0:

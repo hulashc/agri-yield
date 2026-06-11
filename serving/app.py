@@ -136,7 +136,6 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 float(row["lon"]),
             )
             features = {**row.to_dict(), **live}
-            # Pass pre-warmed reference cache — no Parquet scan per request
             drift_result = evaluate_drift(field_id, features, reference_cache=_REFERENCE_CACHE)
             feat_df = pd.DataFrame([features])
             preds, lower, upper = model_module.predict(feat_df)
@@ -236,7 +235,7 @@ def health() -> dict:
 @app.get("/model/info")
 def model_info() -> dict:
     """
-    Returns model training metadata for the competition showcase panel.
+    Returns model training metadata.
     Includes RMSE, dataset source, training date, CI method, and feature list.
     """
     if not model_module.is_loaded():
@@ -248,7 +247,7 @@ def model_info() -> dict:
         "rmse_kg_ha": round(meta.get("rmse", 0), 2),
         "dataset_source": meta.get("dataset_source", "unknown"),
         "trained_at": meta.get("trained_at", "unknown"),
-        "ci_method": "quantile regression (q=0.10 – q=0.90)" if meta.get("has_quantile_ci") else "heuristic ±15%",
+        "ci_method": "quantile regression (q=0.10 - q=0.90)" if meta.get("has_quantile_ci") else "heuristic +/-15%",
         "ci_coverage": meta.get("ci_coverage", "80%"),
         "quantile_lower": meta.get("quantile_lower", None),
         "quantile_upper": meta.get("quantile_upper", None),
@@ -264,7 +263,7 @@ def model_info() -> dict:
 def feature_importance() -> dict:
     """
     Returns feature importance scores from the mean model.
-    Sorted descending by importance. Used in the dashboard info panel.
+    Sorted descending by importance.
     """
     if not model_module.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded yet.")
@@ -338,6 +337,77 @@ async def predict(request: PredictRequest) -> dict:
         "temp_c": live.get("t2m_max_today"),
         "rainfall_mm": live.get("rainfall_today_mm"),
         "solar_rad_mj_m2": live.get("solar_radiation_today"),
+        "model_version": model_module.model_version(),
+        "last_updated": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.post("/predict/explain")
+async def predict_explain(request: PredictRequest) -> dict:
+    """
+    Return a feature contribution breakdown for a single field prediction.
+
+    Method: feature_value * normalised_global_importance (proxy for local explanation).
+    This gives an honest, interpretable ranking without requiring SHAP at inference time.
+    The note field in the response documents this limitation clearly.
+
+    To upgrade to true SHAP local explanations, add shap>=0.45 to dependencies
+    and replace the contribution calculation with shap.TreeExplainer.
+    """
+    if not model_module.is_loaded():
+        raise HTTPException(
+            status_code=503, detail="Model not loaded yet — please retry in a moment."
+        )
+
+    field_meta = get_field_meta(request.field_id)
+
+    async with _PREDICT_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        live = await loop.run_in_executor(
+            None,
+            get_live_features,
+            request.field_id,
+            float(field_meta["lat"]),
+            float(field_meta["lon"]),
+        )
+
+    features = {**field_meta, **live}
+    feat_df = pd.DataFrame([features])
+    preds, lower, upper = model_module.predict(feat_df)
+
+    importance = model_module.get_feature_importance()
+    from training.utils.features import FEATURE_COLS  # noqa: PLC0415
+
+    row = feat_df.reindex(columns=FEATURE_COLS).fillna(0).iloc[0]
+    total_imp = sum(importance.values()) or 1.0
+
+    # Contribution proxy: how much does each feature contribute, weighted by its importance?
+    # Not a true Shapley value — this is feature_value * (importance / total_importance).
+    # Direction is not decomposed. Use SHAP for signed directional contributions.
+    contributions = {
+        feat: round(float(row[feat]) * importance.get(feat, 0.0) / total_imp, 4)
+        for feat in FEATURE_COLS
+    }
+    sorted_contributions = dict(
+        sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
+    )
+    sorted_importance = dict(
+        sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    )
+
+    return {
+        "field_id": request.field_id,
+        "predicted_yield_kg_ha": round(float(preds[0]), 1),
+        "lower_bound": round(float(lower[0]), 1),
+        "upper_bound": round(float(upper[0]), 1),
+        "feature_contributions": sorted_contributions,
+        "feature_importance": sorted_importance,
+        "explanation_method": "feature_importance_proxy",
+        "explanation_note": (
+            "Contributions are feature_value * normalised_global_importance. "
+            "This is a proxy, not a true Shapley value. "
+            "Add shap>=0.45 to pyproject.toml to upgrade to SHAP local explanations."
+        ),
         "model_version": model_module.model_version(),
         "last_updated": datetime.now(UTC).isoformat(),
     }
