@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, improve/**]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -37,6 +37,11 @@ jobs:
       - name: Generate training data and train model
         run: uv run python training/train_and_export.py
 
+      - name: Verify model card was written
+        run: |
+          test -f model_card.json && echo "model_card.json OK" || (echo "model_card.json MISSING" && exit 1)
+          python -c "import json; c=json.load(open('model_card.json')); assert 'rmse_kg_per_ha' in c.get('metrics',{}), 'Missing RMSE in card'"
+
       - name: Assert model quality gate (RMSE < 2000 kg/ha)
         run: |
           uv run python - <<'EOF'
@@ -68,4 +73,14 @@ jobs:
       - name: Run tests with coverage
         run: |
           uv run python -m pytest tests/ -v --tb=short \
-            --cov=. --cov-report=term-missing --cov-fail-under=60
+            --cov=serving --cov=training --cov=monitoring \
+            --cov-report=term-missing \
+            --cov-fail-under=60
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
+          retention-days: 14

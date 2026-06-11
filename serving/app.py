@@ -31,6 +31,7 @@ from serving.metrics import metrics_router
 from serving.model import load_model
 from serving.schemas import PredictRequest
 from serving.version import BUILD_VERSION
+from training.utils.model_card import load_model_card
 
 log = logging.getLogger(__name__)
 
@@ -38,20 +39,22 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
+_DEFAULT_MODEL_CARD_PATH = str(_REPO_ROOT / "model_card.json")
+MODEL_CARD_PATH = os.getenv("MODEL_CARD_PATH", _DEFAULT_MODEL_CARD_PATH)
+
 # Semaphore limits concurrent Open-Meteo calls on Render's free 1-CPU instance.
-# Each call has its own timeout in openmeteo_live.py. If too many fields fail,
-# the global /fields endpoint times out rather than hanging.
 _PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
+_MODEL_CARD: dict = {}
 
 # Resolved path to the bundled static frontend
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 async def _startup_load():
-    """Load CSV + model in the background so the port binds immediately."""
-    global _FIELDS_DF
+    """Load CSV + model + model card in the background so the port binds immediately."""
+    global _FIELDS_DF, _MODEL_CARD
     try:
         log.info("Loading fields from: %s", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.read_csv(FIELDS_CSV_PATH).set_index("field_id")
@@ -59,6 +62,14 @@ async def _startup_load():
     except FileNotFoundError:
         log.warning("%s not found.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
+
+    _MODEL_CARD = load_model_card(MODEL_CARD_PATH)
+    if _MODEL_CARD:
+        log.info("Model card loaded: trained_at=%s, rmse=%.2f",
+                 _MODEL_CARD.get("trained_at", "?"),
+                 _MODEL_CARD.get("metrics", {}).get("rmse_kg_per_ha", 0))
+    else:
+        log.warning("model_card.json not found at %s — /model/info will return empty.", MODEL_CARD_PATH)
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_model)
@@ -79,7 +90,6 @@ _ALLOWED_ORIGINS = [
     "http://127.0.0.1:3001",
     "https://hulashc.github.io",
 ]
-# Allow an explicit override from env (e.g. your specific Vercel deployment URL)
 _extra_origin = os.getenv("EXTRA_CORS_ORIGIN", "").strip()
 if _extra_origin:
     _ALLOWED_ORIGINS.append(_extra_origin)
@@ -96,7 +106,6 @@ app.add_middleware(
 
 app.include_router(metrics_router)
 
-# Serve bundled frontend assets (CSS, JS, icons) under /static
 if _STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
@@ -203,13 +212,31 @@ async def map_ui():
 
 @app.get("/health")
 def health() -> dict:
+    card = _MODEL_CARD
     return {
         "status": "ok",
         "build_version": BUILD_VERSION,
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
         "fields_loaded": not _FIELDS_DF.empty,
+        "model_trained_at": card.get("trained_at"),
+        "model_rmse_kg_ha": card.get("metrics", {}).get("rmse_kg_per_ha"),
+        "dataset_source": card.get("dataset_source"),
     }
+
+
+@app.get("/model/info")
+def model_info() -> dict:
+    """
+    Returns the full model card — algorithm, features, metrics, training date,
+    known limitations. Useful for judges, stakeholders, and the dashboard.
+    """
+    if not _MODEL_CARD:
+        raise HTTPException(
+            status_code=503,
+            detail="Model card not available. Train the model to generate model_card.json.",
+        )
+    return _MODEL_CARD
 
 
 @app.post("/predict")
@@ -222,7 +249,6 @@ async def predict(request: PredictRequest) -> dict:
     start = time.time()
     field_meta = get_field_meta(request.field_id)
 
-    # Throttle live-weather fetches with the same semaphore as bulk /fields
     async with _PREDICT_SEMAPHORE:
         loop = asyncio.get_running_loop()
         live = await loop.run_in_executor(

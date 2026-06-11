@@ -1,7 +1,7 @@
 """
 CI training script.
 Trains XGBoost on real CYCleSS data when available, falls back to synthetic.
-Saves model.pkl to repo root. Uses the canonical FEATURE_COLS.
+Saves model.pkl + model_card.json to repo root. Uses the canonical FEATURE_COLS.
 """
 
 import os
@@ -15,6 +15,7 @@ import pandas as pd
 import xgboost as xgb
 
 from training.utils.features import FEATURE_COLS
+from training.utils.model_card import write_model_card
 from training.utils.splits import temporal_train_test_split
 
 TARGET = "yield_kg_per_ha"
@@ -88,8 +89,19 @@ def train_and_export():
 
     with open(OUTPUT_PATH, "wb") as f:
         pickle.dump(model, f)
-
     print(f"Model saved to {OUTPUT_PATH} ({os.path.getsize(OUTPUT_PATH) / 1024:.1f} KB)")
+
+    # Determine dataset source for model card
+    dataset_source = "CYCleSS UK yield data" if "synthetic" not in DATASET_PATH else "synthetic fallback"
+    write_model_card(
+        rmse=rmse,
+        n_train=len(train_df),
+        n_test=len(test_df),
+        dataset_source=dataset_source,
+        feature_cols=FEATURE_COLS,
+        params=params,
+    )
+
     return rmse
 
 
