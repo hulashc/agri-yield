@@ -162,6 +162,9 @@ def predict(feature_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarra
 
     Ordering is enforced: lower <= mean <= upper per row.
     """
+    if _mean_model is None:
+        raise RuntimeError("model_not_ready")
+
     df = _prep_features(feature_df)
     preds = _mean_model.predict(df)
 

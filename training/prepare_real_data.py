@@ -21,24 +21,28 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from training.utils.features import FEATURE_COLS
 
-RAW_DIR = None
+# --- Locate RAW_DIR (must be Path, never None past this point) ---
+_raw_dir: Path | None = None
 for candidate in [Path("data/raw/cycless/CYCleSS_dataset"), Path("cycless_data/CYCleSS_dataset")]:
     if candidate.exists():
-        RAW_DIR = candidate
+        _raw_dir = candidate
         break
-if RAW_DIR is None:
+if _raw_dir is None:
     zip_candidate = Path("data/raw/cycless.zip")
     if zip_candidate.exists():
         print("Extracting CYCleSS zip...")
         extract_to = Path("data/raw/cycless")
         with zipfile.ZipFile(zip_candidate, "r") as zf:
             zf.extractall(extract_to)
-        RAW_DIR = extract_to / "CYCleSS_dataset"
+        _raw_dir = extract_to / "CYCleSS_dataset"
     else:
         raise FileNotFoundError(
             "CYCleSS data not found. Run `python scripts/download_cycless.py` first, "
             "or place cycless.zip at data/raw/cycless.zip"
         )
+
+# RAW_DIR is guaranteed Path from here — mypy can verify
+RAW_DIR: Path = _raw_dir
 
 OUTPUT_PATH = "data/features/weekly_field_features.parquet"
 
@@ -49,8 +53,6 @@ CROP_MAP = {
     "OSR": 4,
     "Beans": 5,
 }
-
-# SOIL_TEXT_TO_ENCODED = {}  # removed — 'text' is a numeric code, used directly
 
 
 def osgb_to_latlon(east: float, north: float) -> tuple[float, float]:
@@ -96,7 +98,7 @@ def load_climate(year: int) -> pd.DataFrame:
                "rsds": "shortwave_radiation_sum", "pet": "et0_fao_evapotranspiration",
                "sfcWind": "wind_speed", "huss": "specific_humidity"}
 
-    merged = None
+    merged: pd.DataFrame | None = None
     for fname in os.listdir(climate_dir):
         if not fname.endswith(".csv"):
             continue
@@ -105,19 +107,17 @@ def load_climate(year: int) -> pd.DataFrame:
         if feat_name is None:
             continue
         df = pd.read_csv(climate_dir / fname)
-        # Drop unnamed index column if present
         unnamed = [c for c in df.columns if "Unnamed" in c]
         if unnamed:
             df = df.drop(columns=unnamed)
-        # Find date columns (skip grid_ID column)
         date_cols = [c for c in df.columns if c.startswith("X")]
-        # Filter to Apr-Sep (months 4-9) growing season
         season_cols = [c for c in date_cols if int(c.split(".")[1]) in range(4, 10)]
         df[feat_name] = df[season_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        # Average per grid_ID (climate file has multiple rows per cell)
         sub = df.groupby("grid_ID", as_index=False)[feat_name].mean()
         merged = sub if merged is None else merged.merge(sub, on="grid_ID")
 
+    if merged is None:
+        return pd.DataFrame()
     return merged
 
 
@@ -126,7 +126,6 @@ def load_soil() -> pd.DataFrame:
     unnamed = [c for c in soil.columns if "Unnamed" in c]
     if unnamed:
         soil = soil.drop(columns=unnamed)
-    # Average per grid_ID (some grid cells may have multiple soil records)
     return soil.groupby("grid_ID", as_index=False)[
         ["grid_ID", "clay", "sand", "silt", "awc", "bd", "fc", "ks", "text"]
     ].first()
@@ -148,7 +147,7 @@ def prepare():
             crop_raw = row["Crop"]
             crop_enc = CROP_MAP.get(crop_raw, 3)
             soil_row = soil_df[soil_df["grid_ID"] == grid_id]
-            climate_row = climate_feat[climate_feat["grid_ID"] == grid_id] if climate_feat is not None else pd.DataFrame()
+            climate_row = climate_feat[climate_feat["grid_ID"] == grid_id] if not climate_feat.empty else pd.DataFrame()
 
             lat, lon = osgb_to_latlon(float(row["east"]), float(row["north"]))
 

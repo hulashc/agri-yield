@@ -34,6 +34,7 @@ dev = [
     "hatchling>=1.29.0",
     "httpx>=0.28.0",
     "mypy>=1.20.2",
+    "pandas-stubs>=2.2.0",
     "pre-commit>=4.6.0",
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
@@ -46,7 +47,6 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# All importable packages — training was previously missing and caused ModuleNotFoundError
 packages = [
     "contracts",
     "orchestration",
@@ -65,7 +65,28 @@ package = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["requests", "requests.*", "feast.*", "pyspark.*", "kafka.*", "confluent_kafka.*"]
+module = [
+    # Third-party libs with no stubs — ignore cleanly
+    "requests",
+    "requests.*",
+    "feast.*",
+    "pyspark.*",
+    "kafka.*",
+    "confluent_kafka.*",
+    "sklearn.*",
+    "xgboost.*",
+    "evidently.*",
+    "rasterio.*",
+    "mlflow.*",
+    "optuna.*",
+    "prefect.*",
+    "prometheus_client.*",
+    "prometheus_fastapi_instrumentator.*",
+    "great_expectations.*",
+    "shapely.*",
+    "pystac_client.*",
+    "grafana_api.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff]
