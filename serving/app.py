@@ -26,7 +26,7 @@ from monitoring.prometheus_metrics import (
     PREDICTIONS_TOTAL,
     STALE_FEATURE_REQUESTS,
 )
-from monitoring.psi_detector import evaluate_drift
+from monitoring.psi_detector import MONITORED_FEATURES, evaluate_drift, load_reference_distribution
 from serving.metrics import metrics_router
 from serving.model import load_model
 from serving.schemas import PredictRequest
@@ -39,18 +39,35 @@ _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
 # Semaphore limits concurrent Open-Meteo calls on Render's free 1-CPU instance.
-# Each call has its own timeout in openmeteo_live.py. If too many fields fail,
-# the global /fields endpoint times out rather than hanging.
 _PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
+
+# Reference distribution cache — loaded once at startup, not per-request.
+# Eliminates the per-request Parquet scan that was hitting /fields hard.
+_REFERENCE_CACHE: dict = {}
 
 # Resolved path to the bundled static frontend
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+def _warm_reference_cache() -> None:
+    """Pre-load all PSI reference distributions into memory at startup."""
+    global _REFERENCE_CACHE
+    loaded = 0
+    for feature in MONITORED_FEATURES:
+        try:
+            ref = load_reference_distribution(feature)
+            if len(ref) > 0:
+                _REFERENCE_CACHE[feature] = ref
+                loaded += 1
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not load reference dist for %s: %s", feature, exc)
+    log.info("Warmed reference cache: %d / %d features loaded", loaded, len(MONITORED_FEATURES))
+
+
 async def _startup_load():
-    """Load CSV + model in the background so the port binds immediately."""
+    """Load CSV + model + reference cache in the background so the port binds immediately."""
     global _FIELDS_DF
     try:
         log.info("Loading fields from: %s", FIELDS_CSV_PATH)
@@ -62,6 +79,7 @@ async def _startup_load():
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_model)
+    await loop.run_in_executor(None, _warm_reference_cache)
 
 
 @asynccontextmanager
@@ -71,7 +89,7 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
-# CORS: lock to known origins only — no wildcard subdomains
+# CORS: lock to known origins only
 # ---------------------------------------------------------------------------
 _ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -79,7 +97,6 @@ _ALLOWED_ORIGINS = [
     "http://127.0.0.1:3001",
     "https://hulashc.github.io",
 ]
-# Allow an explicit override from env (e.g. your specific Vercel deployment URL)
 _extra_origin = os.getenv("EXTRA_CORS_ORIGIN", "").strip()
 if _extra_origin:
     _ALLOWED_ORIGINS.append(_extra_origin)
@@ -96,7 +113,6 @@ app.add_middleware(
 
 app.include_router(metrics_router)
 
-# Serve bundled frontend assets (CSS, JS, icons) under /static
 if _STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
@@ -120,7 +136,8 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 float(row["lon"]),
             )
             features = {**row.to_dict(), **live}
-            drift_result = evaluate_drift(field_id, features)
+            # Pass pre-warmed reference cache — no Parquet scan per request
+            drift_result = evaluate_drift(field_id, features, reference_cache=_REFERENCE_CACHE)
             feat_df = pd.DataFrame([features])
             preds, lower, upper = model_module.predict(feat_df)
             return {
@@ -203,12 +220,61 @@ async def map_ui():
 
 @app.get("/health")
 def health() -> dict:
+    meta = model_module.get_bundle_meta()
     return {
         "status": "ok",
         "build_version": BUILD_VERSION,
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
+        "has_quantile_ci": meta.get("has_quantile_ci", False),
         "fields_loaded": not _FIELDS_DF.empty,
+        "fields_count": len(_FIELDS_DF),
+        "reference_cache_features": len(_REFERENCE_CACHE),
+    }
+
+
+@app.get("/model/info")
+def model_info() -> dict:
+    """
+    Returns model training metadata for the competition showcase panel.
+    Includes RMSE, dataset source, training date, CI method, and feature list.
+    """
+    if not model_module.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+    meta = model_module.get_bundle_meta()
+    return {
+        "model_version": meta.get("model_version", "unknown"),
+        "algorithm": "XGBoost (XGBRegressor)",
+        "rmse_kg_ha": round(meta.get("rmse", 0), 2),
+        "dataset_source": meta.get("dataset_source", "unknown"),
+        "trained_at": meta.get("trained_at", "unknown"),
+        "ci_method": "quantile regression (q=0.10 – q=0.90)" if meta.get("has_quantile_ci") else "heuristic ±15%",
+        "ci_coverage": meta.get("ci_coverage", "80%"),
+        "quantile_lower": meta.get("quantile_lower", None),
+        "quantile_upper": meta.get("quantile_upper", None),
+        "has_quantile_ci": meta.get("has_quantile_ci", False),
+        "feature_cols": meta.get("feature_cols", []),
+        "n_features": len(meta.get("feature_cols", [])),
+        "ci_ordering_violations": meta.get("ordering_violations", None),
+        "reference_cache_features": len(_REFERENCE_CACHE),
+    }
+
+
+@app.get("/model/feature-importance")
+def feature_importance() -> dict:
+    """
+    Returns feature importance scores from the mean model.
+    Sorted descending by importance. Used in the dashboard info panel.
+    """
+    if not model_module.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+    importance = model_module.get_feature_importance()
+    sorted_importance = dict(
+        sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    )
+    return {
+        "feature_importance": sorted_importance,
+        "model_version": model_module.model_version(),
     }
 
 
@@ -222,7 +288,6 @@ async def predict(request: PredictRequest) -> dict:
     start = time.time()
     field_meta = get_field_meta(request.field_id)
 
-    # Throttle live-weather fetches with the same semaphore as bulk /fields
     async with _PREDICT_SEMAPHORE:
         loop = asyncio.get_running_loop()
         live = await loop.run_in_executor(
@@ -237,7 +302,7 @@ async def predict(request: PredictRequest) -> dict:
         STALE_FEATURE_REQUESTS.labels(field_id=request.field_id).inc()
 
     features = {**field_meta, **live}
-    drift_result = evaluate_drift(request.field_id, features)
+    drift_result = evaluate_drift(request.field_id, features, reference_cache=_REFERENCE_CACHE)
     feat_df = pd.DataFrame([features])
     preds, lower, upper = model_module.predict(feat_df)
     prediction = {
@@ -257,12 +322,15 @@ async def predict(request: PredictRequest) -> dict:
     )
     PREDICTION_CI_WIDTH.observe(prediction["upper"] - prediction["lower"])
 
+    meta = model_module.get_bundle_meta()
+
     return {
         "field_id": request.field_id,
         "predicted_yield_kg_ha": prediction["mean"],
         "lower_bound": prediction["lower"],
         "upper_bound": prediction["upper"],
         "confidence_level": 0.80,
+        "ci_method": "quantile" if meta.get("has_quantile_ci") else "heuristic",
         "drift_warning": drift_result["drift_warning"],
         "drift_level": drift_result["drift_level"],
         "psi_score": drift_result["max_psi"],
