@@ -38,42 +38,39 @@ jobs:
       - name: Generate training data and train model
         run: uv run python training/train_and_export.py
 
-      - name: Assert model quality gate (RMSE < 2000 kg/ha)
+      - name: Verify model artefacts exist
+        run: |
+          set -e
+          ls -lh model.pkl
+          ls -lh model_bundle.pkl
+          echo "model.pkl and model_bundle.pkl ready"
+
+      - name: Assert quality gate (RMSE from bundle < 2000 kg/ha)
         run: |
           uv run python - <<'EOF'
-          import pickle, numpy as np, pandas as pd
-          from training.utils.features import FEATURE_COLS
-          from training.utils.splits import temporal_train_test_split
+          import pickle
 
-          TARGET = "yield_kg_per_ha"
-          df = pd.read_parquet("data/features/weekly_field_features.parquet")
-          df = df.dropna(subset=[TARGET])
-          for col in FEATURE_COLS:
-              if col not in df.columns:
-                  df[col] = 0
-          df["week_start"] = pd.to_datetime(
-              df["year"].astype(str) + "-W" + df["week_of_year"].astype(str).str.zfill(2) + "-1",
-              format="%G-W%V-%u",
-              errors="coerce",
-          )
-          _, test_df = temporal_train_test_split(df)
-          with open("model.pkl", "rb") as f:
-              model = pickle.load(f)
-          preds = model.predict(test_df[FEATURE_COLS])
-          rmse = float(np.sqrt(np.mean((test_df[TARGET].values - preds) ** 2)))
-          print(f"Quality gate RMSE: {rmse:.2f} kg/ha")
+          with open("model_bundle.pkl", "rb") as f:
+              bundle = pickle.load(f)
+
+          rmse = bundle.get("rmse", 9999)
+          has_quantile = "lower" in bundle and "upper" in bundle
+          dataset_source = bundle.get("dataset_source", "unknown")
+          trained_at = bundle.get("trained_at", "unknown")
+
+          print(f"Bundle RMSE:        {rmse:.2f} kg/ha")
+          print(f"Has quantile CI:    {has_quantile}")
+          print(f"Dataset source:     {dataset_source}")
+          print(f"Trained at:         {trained_at}")
+          print(f"Ordering violations:{bundle.get('ordering_violations', 'n/a')}")
+
           assert rmse < 2000, f"RMSE {rmse:.2f} exceeds threshold of 2000 kg/ha — failing CI"
+          assert has_quantile, "model_bundle.pkl missing quantile models — check train_and_export.py"
           print("Quality gate passed.")
           EOF
 
       - name: Run tests
         run: uv run python -m pytest tests/ -v --tb=short
-
-      - name: Verify model.pkl exists
-        run: |
-          set -e
-          ls -lh model.pkl
-          echo "model.pkl ready"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -100,7 +97,7 @@ jobs:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
         run: curl -fsSL "$RENDER_DEPLOY_HOOK"
 
-      - name: Wait for deploy and verify /health
+      - name: Wait for deploy and verify /health + /model/info
         if: env.RENDER_SERVICE_URL != ''
         env:
           RENDER_SERVICE_URL: ${{ secrets.RENDER_SERVICE_URL }}
@@ -112,7 +109,9 @@ jobs:
             status=$(curl -s -o /dev/null -w "%{http_code}" "$RENDER_SERVICE_URL/health" 2>/dev/null || echo "000")
             if [ "$status" = "200" ]; then
               echo "Deploy verified — /health returned 200"
-              curl -s "$RENDER_SERVICE_URL/health"
+              curl -s "$RENDER_SERVICE_URL/health" | python3 -m json.tool
+              echo "--- Model info ---"
+              curl -s "$RENDER_SERVICE_URL/model/info" | python3 -m json.tool
               exit 0
             fi
             echo "Attempt $i: status=$status"
