@@ -29,9 +29,8 @@ from monitoring.prometheus_metrics import (
 from monitoring.psi_detector import evaluate_drift
 from serving.metrics import metrics_router
 from serving.model import load_model
-from serving.schemas import PredictRequest
+from serving.schemas import ModelInfoResponse, PredictRequest
 from serving.version import BUILD_VERSION
-from training.utils.model_card import load_model_card
 
 log = logging.getLogger(__name__)
 
@@ -39,22 +38,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_FIELDS_PATH = str(_REPO_ROOT / "data" / "seed" / "uk_fields.csv")
 FIELDS_CSV_PATH = os.getenv("FIELDS_CSV_PATH", _DEFAULT_FIELDS_PATH)
 
-_DEFAULT_MODEL_CARD_PATH = str(_REPO_ROOT / "model_card.json")
-MODEL_CARD_PATH = os.getenv("MODEL_CARD_PATH", _DEFAULT_MODEL_CARD_PATH)
-
 # Semaphore limits concurrent Open-Meteo calls on Render's free 1-CPU instance.
 _PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
-_MODEL_CARD: dict = {}
 
-# Resolved path to the bundled static frontend
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 async def _startup_load():
-    """Load CSV + model + model card in the background so the port binds immediately."""
-    global _FIELDS_DF, _MODEL_CARD
+    """Load CSV + model in the background so the port binds immediately."""
+    global _FIELDS_DF
     try:
         log.info("Loading fields from: %s", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.read_csv(FIELDS_CSV_PATH).set_index("field_id")
@@ -62,14 +56,6 @@ async def _startup_load():
     except FileNotFoundError:
         log.warning("%s not found.", FIELDS_CSV_PATH)
         _FIELDS_DF = pd.DataFrame()
-
-    _MODEL_CARD = load_model_card(MODEL_CARD_PATH)
-    if _MODEL_CARD:
-        log.info("Model card loaded: trained_at=%s, rmse=%.2f",
-                 _MODEL_CARD.get("trained_at", "?"),
-                 _MODEL_CARD.get("metrics", {}).get("rmse_kg_per_ha", 0))
-    else:
-        log.warning("model_card.json not found at %s — /model/info will return empty.", MODEL_CARD_PATH)
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_model)
@@ -82,7 +68,7 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
-# CORS: lock to known origins only — no wildcard subdomains
+# CORS
 # ---------------------------------------------------------------------------
 _ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -144,6 +130,7 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "predicted_yield_kg_ha": round(float(preds[0]), 1),
                 "lower_bound": round(float(lower[0]), 1),
                 "upper_bound": round(float(upper[0]), 1),
+                "confidence_method": "xgboost_quantile_regression" if model_module.using_bundle() else "legacy_symmetric_ci",
                 "drift_warning": drift_result["drift_warning"],
                 "drift_level": drift_result["drift_level"],
                 "stale_features": live.get("stale_features", False),
@@ -166,6 +153,7 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 "predicted_yield_kg_ha": None,
                 "lower_bound": None,
                 "upper_bound": None,
+                "confidence_method": None,
                 "drift_warning": False,
                 "drift_level": "none",
                 "stale_features": False,
@@ -195,10 +183,32 @@ async def bulk_fields():
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=90.0)
     except TimeoutError:
         log.warning("/fields timed out after 90s")
-        raise HTTPException(
-            status_code=503, detail="Prediction timed out — please retry."
-        )
+        raise HTTPException(status_code=503, detail="Prediction timed out — please retry.")
     return {"fields": list(results), "model_version": model_module.model_version()}
+
+
+@app.get("/model/info", response_model=ModelInfoResponse)
+def model_info() -> ModelInfoResponse:
+    """
+    Return model card: training metadata, feature importance, CI method.
+    Useful for explainability dashboards and competition judges.
+    """
+    meta = model_module.get_bundle_meta()
+    return ModelInfoResponse(
+        model_version=meta.get("model_version", "unknown"),
+        confidence_method=meta.get("confidence_method", "unknown"),
+        using_bundle=meta.get("using_bundle", False),
+        trained_at=meta.get("trained_at"),
+        rmse_kg_ha=meta.get("rmse_kg_ha"),
+        mae_kg_ha=meta.get("mae_kg_ha"),
+        pi_coverage_pct=meta.get("pi_coverage_pct"),
+        interval_label=meta.get("interval_label"),
+        split_policy=meta.get("split_policy"),
+        n_train=meta.get("n_train"),
+        n_test=meta.get("n_test"),
+        top_features=meta.get("top_features", []),
+        warning=meta.get("warning"),
+    )
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -212,31 +222,14 @@ async def map_ui():
 
 @app.get("/health")
 def health() -> dict:
-    card = _MODEL_CARD
     return {
         "status": "ok",
         "build_version": BUILD_VERSION,
         "model_loaded": model_module.is_loaded(),
         "model_version": model_module.model_version(),
+        "using_bundle": model_module.using_bundle(),
         "fields_loaded": not _FIELDS_DF.empty,
-        "model_trained_at": card.get("trained_at"),
-        "model_rmse_kg_ha": card.get("metrics", {}).get("rmse_kg_per_ha"),
-        "dataset_source": card.get("dataset_source"),
     }
-
-
-@app.get("/model/info")
-def model_info() -> dict:
-    """
-    Returns the full model card — algorithm, features, metrics, training date,
-    known limitations. Useful for judges, stakeholders, and the dashboard.
-    """
-    if not _MODEL_CARD:
-        raise HTTPException(
-            status_code=503,
-            detail="Model card not available. Train the model to generate model_card.json.",
-        )
-    return _MODEL_CARD
 
 
 @app.post("/predict")
@@ -266,6 +259,7 @@ async def predict(request: PredictRequest) -> dict:
     drift_result = evaluate_drift(request.field_id, features)
     feat_df = pd.DataFrame([features])
     preds, lower, upper = model_module.predict(feat_df)
+
     prediction = {
         "mean": float(preds[0]),
         "lower": float(lower[0]),
@@ -289,6 +283,7 @@ async def predict(request: PredictRequest) -> dict:
         "lower_bound": prediction["lower"],
         "upper_bound": prediction["upper"],
         "confidence_level": 0.80,
+        "confidence_method": "xgboost_quantile_regression" if model_module.using_bundle() else "legacy_symmetric_ci",
         "drift_warning": drift_result["drift_warning"],
         "drift_level": drift_result["drift_level"],
         "psi_score": drift_result["max_psi"],
