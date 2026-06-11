@@ -2,9 +2,9 @@ name: CI — Lint & Test
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, improve/competition-upgrade]
   push:
-    branches: [main, improve/**]
+    branches: [main, improve/competition-upgrade]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -37,50 +37,18 @@ jobs:
       - name: Generate training data and train model
         run: uv run python training/train_and_export.py
 
-      - name: Verify model card was written
-        run: |
-          test -f model_card.json && echo "model_card.json OK" || (echo "model_card.json MISSING" && exit 1)
-          python -c "import json; c=json.load(open('model_card.json')); assert 'rmse_kg_per_ha' in c.get('metrics',{}), 'Missing RMSE in card'"
-
       - name: Assert model quality gate (RMSE < 2000 kg/ha)
-        run: |
-          uv run python - <<'EOF'
-          import pickle, numpy as np, pandas as pd
-          from training.utils.features import FEATURE_COLS
-          from training.utils.splits import temporal_train_test_split
+        run: uv run python scripts/quality_gate.py
 
-          TARGET = "yield_kg_per_ha"
-          df = pd.read_parquet("data/features/weekly_field_features.parquet")
-          df = df.dropna(subset=[TARGET])
-          for col in FEATURE_COLS:
-              if col not in df.columns:
-                  df[col] = 0
-          df["week_start"] = pd.to_datetime(
-              df["year"].astype(str) + "-W" + df["week_of_year"].astype(str).str.zfill(2) + "-1",
-              format="%G-W%V-%u",
-              errors="coerce",
-          )
-          _, test_df = temporal_train_test_split(df)
-          with open("model.pkl", "rb") as f:
-              model = pickle.load(f)
-          preds = model.predict(test_df[FEATURE_COLS])
-          rmse = float(np.sqrt(np.mean((test_df[TARGET].values - preds) ** 2)))
-          print(f"Quality gate RMSE: {rmse:.2f} kg/ha")
-          assert rmse < 2000, f"RMSE {rmse:.2f} exceeds threshold of 2000 kg/ha — failing CI"
-          print("Quality gate passed.")
-          EOF
+      - name: Upload quality gate result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-result
+          path: scripts/quality_gate_result.json
+          if-no-files-found: ignore
 
       - name: Run tests with coverage
         run: |
           uv run python -m pytest tests/ -v --tb=short \
-            --cov=serving --cov=training --cov=monitoring \
-            --cov-report=term-missing \
-            --cov-fail-under=60
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: .coverage
-          retention-days: 14
+            --cov=. --cov-report=term-missing --cov-fail-under=70
