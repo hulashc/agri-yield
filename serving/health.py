@@ -23,7 +23,6 @@ def check_model() -> bool:
 def check_redis() -> bool:
     try:
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, socket_connect_timeout=1)
-        # redis-py ping() returns bool in sync client — cast explicitly for mypy
         return bool(r.ping())
     except Exception:
         return False
@@ -36,8 +35,12 @@ def check_materialization_age() -> bool:
         ts_bytes = r.get("feast:last_materialization_ts")
         if not ts_bytes:
             return False
-        # ts_bytes is bytes in sync redis client — decode explicitly
-        raw = ts_bytes if isinstance(ts_bytes, str) else ts_bytes.decode()
+        # r.get() returns bytes in the sync redis client.
+        # Narrow the type explicitly before decode() so mypy is satisfied.
+        if isinstance(ts_bytes, bytes):
+            raw: str = ts_bytes.decode("utf-8")
+        else:
+            raw = str(ts_bytes)
         last_mat = datetime.fromisoformat(raw)
         age_hours = (datetime.now(UTC) - last_mat).total_seconds() / 3600
         return age_hours < MAX_MATERIALIZATION_AGE_HOURS
@@ -45,8 +48,8 @@ def check_materialization_age() -> bool:
         return False
 
 
-def run_health_checks() -> dict:
-    checks = {
+def run_health_checks() -> dict[str, bool]:
+    checks: dict[str, bool] = {
         "model_loaded": check_model(),
         "redis_connected": check_redis(),
         "materialization_fresh": check_materialization_age(),

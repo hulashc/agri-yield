@@ -51,7 +51,10 @@ def test_fields_returns_all_fields(app):
     body = resp.json()
     assert "fields" in body
     assert len(body["fields"]) == 3
-    assert body["model_version"] == "pkl-ci"
+    # model_version is either the legacy 'pkl-ci' format or the new
+    # bundle-YYYY-MM-DD format produced by the multi-model training pipeline.
+    mv = body["model_version"]
+    assert mv.startswith("bundle-") or mv == "pkl-ci", f"Unexpected model_version: {mv!r}"
 
 
 def test_fields_contains_expected_keys(app):
@@ -101,7 +104,9 @@ def test_predict_single_field(app):
     assert body["field_id"] == "F001"
     assert body["predicted_yield_kg_ha"] > 0
     assert body["lower_bound"] < body["upper_bound"]
-    assert body["model_version"] == "pkl-ci"
+    # model_version is either legacy 'pkl-ci' or new 'bundle-YYYY-MM-DD' format
+    mv = body["model_version"]
+    assert mv.startswith("bundle-") or mv == "pkl-ci", f"Unexpected model_version: {mv!r}"
 
 
 def test_predict_unknown_field_returns_404(app):

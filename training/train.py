@@ -27,10 +27,10 @@ REGISTERED_MODEL_NAME = "agri-yield-xgb"
 
 def train(
     dataset_path: str = "data/features/weekly_field_features",
-    params: dict | None = None,
+    params: dict[str, object] | None = None,
     dvc_commit: str = "unknown",
     n_cv_folds: int = 5,
-):
+) -> tuple[str, dict[str, float]]:
     if params is None:
         params = {
             "max_depth": 6,
@@ -62,12 +62,14 @@ def train(
     y_test = test_df[TARGET]
 
     tscv = TimeSeriesSplit(n_splits=n_cv_folds)
-    cv_rmse_scores, cv_mae_scores, cv_r2_scores = [], [], []
+    cv_rmse_scores: list[float] = []
+    cv_mae_scores: list[float] = []
+    cv_r2_scores: list[float] = []
     X_train_arr = X_train.values
-    y_train_arr = y_train.values
+    y_train_arr = np.asarray(y_train.values, dtype=float)
 
     for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train_arr)):
-        fold_model = xgb.XGBRegressor(**params)
+        fold_model = xgb.XGBRegressor(**params)  # type: ignore[arg-type]
         fold_model.fit(
             X_train_arr[train_idx],
             y_train_arr[train_idx],
@@ -80,10 +82,13 @@ def train(
         cv_mae_scores.append(fold_metrics["mae"])
         cv_r2_scores.append(fold_metrics["r2"])
 
-    model = xgb.XGBRegressor(**params)
+    model = xgb.XGBRegressor(**params)  # type: ignore[arg-type]
     model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
     test_preds = model.predict(X_test)
-    holdout_metrics = compute_metrics(y_test.values, test_preds)
+    # Cast y_test.values explicitly — pd.Series.values returns ndarray[tuple[int], ...]
+    # which mypy's pandas stubs type as ndarray[tuple[int], dtype[Any]] | ExtensionArray.
+    # np.asarray() narrows this to a plain ndarray that compute_metrics accepts.
+    holdout_metrics = compute_metrics(np.asarray(y_test.values, dtype=float), test_preds)
 
     test_df_copy = test_df.copy()
     test_df_copy["_pred"] = test_preds
@@ -112,7 +117,6 @@ def train(
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
-        # MLflow v3: log_model returns a LoggedModel with model_uri
         logged = mlflow.xgboost.log_model(model, name="model")
         model_uri = logged.model_uri
         run_id = run.info.run_id
@@ -126,7 +130,7 @@ def train(
             version=result.version,
         )
         print(
-            f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' \u2192 alias=challenger"
+            f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → alias=challenger"
         )
         print(f"Run ID: {run_id}")
         print(f"Model URI: {model_uri}")

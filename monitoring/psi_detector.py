@@ -48,21 +48,21 @@ MONITORED_FEATURES = [
 ]
 
 # Rolling buffer: field_id → feature → list of recent values
-_live_buffer: dict = {}
+_live_buffer: dict[str, dict[str, list[float]]] = {}
 BUFFER_SIZE = 500
 
 
-def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray:
+def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray:  # type: ignore[type-arg]
     """Append a live value to the rolling buffer and return the current window."""
     _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
     buf = _live_buffer[field_id][feature]
     buf.append(value)
     if len(buf) > BUFFER_SIZE:
         buf.pop(0)
-    return np.array(buf)
+    return np.array(buf, dtype=float)
 
 
-def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) -> float:
+def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) -> float:  # type: ignore[type-arg]
     """
     Compute Population Stability Index between two distributions.
 
@@ -85,11 +85,11 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) ->
     breakpoints = np.percentile(reference, np.linspace(0, 100, n_bins + 1))
     breakpoints = np.unique(breakpoints)
 
-    def safe_pct(arr: np.ndarray, bins: np.ndarray) -> np.ndarray:
+    def safe_pct(arr: np.ndarray, bins: np.ndarray) -> np.ndarray:  # type: ignore[type-arg]
         counts, _ = np.histogram(arr, bins=bins)
         pct = counts / len(arr)
         pct = np.where(pct == 0, 1e-4, pct)
-        return pct
+        return pct  # type: ignore[return-value]
 
     ref_pct = safe_pct(reference, breakpoints)
     cur_pct = safe_pct(current, breakpoints)
@@ -104,7 +104,7 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) ->
 
 def load_reference_distribution(
     feature: str, data_root: str = "data/raw/nasa_power"
-) -> np.ndarray:
+) -> np.ndarray:  # type: ignore[type-arg]
     """
     Load the reference distribution for a feature from saved Parquet files.
 
@@ -114,7 +114,7 @@ def load_reference_distribution(
     root = Path(data_root)
     all_files = list(root.glob("*/[0-9][0-9][0-9][0-9].parquet"))
 
-    nasa_col_map = {
+    nasa_col_map: dict[str, str] = {
         "rainfall_today_mm": "PRECTOTCORR",
         "t2m_max_today": "T2M_MAX",
         "t2m_min_today": "T2M_MIN",
@@ -124,7 +124,7 @@ def load_reference_distribution(
 
     col = nasa_col_map.get(feature)
     if col is None:
-        return np.array([])
+        return np.array([], dtype=float)
 
     dfs = []
     for f in all_files:
@@ -135,17 +135,18 @@ def load_reference_distribution(
             continue
 
     if not dfs:
-        return np.array([])
+        return np.array([], dtype=float)
 
     combined = pd.concat(dfs)
-    return combined[col].dropna().values
+    # Cast explicitly to np.ndarray to satisfy mypy return-value check
+    return np.asarray(combined[col].dropna().values, dtype=float)
 
 
 def evaluate_drift(
     field_id: str,
-    live_features: dict,
-    reference_cache: dict | None = None,
-) -> dict:
+    live_features: dict[str, object],
+    reference_cache: dict[str, np.ndarray] | None = None,  # type: ignore[type-arg]
+) -> dict[str, object]:
     """
     Run PSI for each monitored feature using a rolling buffer of live values.
     Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
@@ -163,14 +164,14 @@ def evaluate_drift(
             "This is slow. Pass the startup-warmed cache from serving/app.py instead."
         )
 
-    psi_scores = {}
+    psi_scores: dict[str, float] = {}
 
     for feature in MONITORED_FEATURES:
         val = live_features.get(feature)
         if val is None:
             continue
 
-        current = _append_to_buffer(field_id, feature, float(val))
+        current = _append_to_buffer(field_id, feature, float(val))  # type: ignore[arg-type]
 
         if len(current) < MIN_CURRENT_SAMPLES:
             psi_scores[feature] = 0.0

@@ -1,8 +1,8 @@
 """
 orchestration/retrain_trigger_flow.py
 
-Prefect flow: triggered when PSI drift exceeds the RED threshold (0.20).
-Wraps the existing training_flow and promotion_flow.
+Prefect flow: triggered when PSI drift exceeds the RED threshold (0.50).
+Wraps the existing training pipeline and handles promotion logic.
 Schedule: Every Sunday 02:00 UTC + on-demand drift trigger.
 """
 
@@ -43,16 +43,14 @@ def get_production_rmse() -> float:
 
 
 @task(name="run-training-pipeline")
-def run_training() -> dict:
+def run_training() -> dict[str, object]:
     """
-    Execute the training pipeline.
-    Imports training/train.py directly rather than subprocess.
+    Execute the training pipeline via subprocess.
     Returns dict with run_id and rmse_val.
     """
     logger = get_run_logger()
     logger.info("Starting training run...")
 
-    # Import and run training
     import subprocess
     import sys
 
@@ -64,11 +62,16 @@ def run_training() -> dict:
 
     logger.info(result.stdout)
 
-    # Get the latest run from MLflow (just completed)
     client = mlflow.tracking.MlflowClient(
         tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
     )
     experiment = client.get_experiment_by_name("agri-yield")
+    # Guard against None experiment (first run before any experiment exists)
+    if experiment is None:
+        raise RuntimeError(
+            "MLflow experiment 'agri-yield' not found. "
+            "Run training/train.py at least once to create it."
+        )
     runs = client.search_runs(
         experiment_ids=[experiment.experiment_id],
         order_by=["start_time DESC"],
@@ -85,14 +88,14 @@ def run_training() -> dict:
 
 
 @task(name="promote-if-better")
-def promote_if_better(new_run: dict, current_rmse: float) -> bool:
+def promote_if_better(new_run: dict[str, object], current_rmse: float) -> bool:
     """
     Promote new model to Production if RMSE improved by >5%.
     Returns True if promoted.
     """
     logger = get_run_logger()
-    new_rmse = new_run["rmse_val"]
-    threshold = current_rmse * 0.95  # Must beat by 5%
+    new_rmse = float(new_run["rmse_val"])  # type: ignore[arg-type]
+    threshold = current_rmse * 0.95
 
     logger.info(
         f"New RMSE: {new_rmse:.2f} | Current: {current_rmse:.2f} | Threshold: {threshold:.2f}"
@@ -103,9 +106,8 @@ def promote_if_better(new_run: dict, current_rmse: float) -> bool:
             tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
         )
         model_name = "agri-yield-xgboost"
-        # Register model
-        mv = mlflow.register_model(f"runs:/{new_run['run_id']}/model", model_name)
-        # Transition to Production
+        run_id = str(new_run["run_id"])
+        mv = mlflow.register_model(f"runs:/{run_id}/model", model_name)
         client.transition_model_version_stage(
             name=model_name,
             version=mv.version,
@@ -113,12 +115,12 @@ def promote_if_better(new_run: dict, current_rmse: float) -> bool:
             archive_existing_versions=True,
         )
         logger.info(
-            f"✅ Promoted version {mv.version} to Production (RMSE {new_rmse:.2f})"
+            f"Promoted version {mv.version} to Production (RMSE {new_rmse:.2f})"
         )
         RETRAIN_PROMOTED.inc()
         return True
     else:
-        logger.info("⚠️  New model not better enough — keeping current Production model")
+        logger.info("New model not better enough — keeping current Production model")
         return False
 
 
@@ -126,7 +128,7 @@ def promote_if_better(new_run: dict, current_rmse: float) -> bool:
     name="agri-yield-retrain-trigger",
     description="Drift-triggered and scheduled retraining flow for agri-yield",
 )
-def retrain_trigger_flow(trigger_reason: str = "scheduled") -> dict:
+def retrain_trigger_flow(trigger_reason: str = "scheduled") -> dict[str, object]:
     """
     Main retraining flow.
 
@@ -134,7 +136,7 @@ def retrain_trigger_flow(trigger_reason: str = "scheduled") -> dict:
         trigger_reason: 'scheduled' | 'drift' | 'manual'
     """
     logger = get_run_logger()
-    logger.info(f"🚀 Retraining triggered by: {trigger_reason}")
+    logger.info(f"Retraining triggered by: {trigger_reason}")
 
     RETRAIN_EVENTS.labels(trigger_reason=trigger_reason).inc()
 

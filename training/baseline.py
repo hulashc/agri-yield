@@ -16,27 +16,29 @@ from training.utils.splits import temporal_train_test_split
 class MeanByCropBaseline(BaseEstimator, RegressorMixin):
     """Predicts mean yield observed for each crop type in training data."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.crop_means_: dict[str, float] = {}
         self.global_mean_: float = 0.0
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "MeanByCropBaseline":
         df = X.copy()
         df["_target"] = y.values
-        self.crop_means_ = df.groupby("crop_type")["_target"].mean().to_dict()
+        # groupby keys are Hashable; cast to str explicitly for type safety
+        raw_means: dict[object, float] = df.groupby("crop_type")["_target"].mean().to_dict()
+        self.crop_means_ = {str(k): v for k, v in raw_means.items()}
         self.global_mean_ = float(y.mean())
         return self
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: pd.DataFrame) -> np.ndarray:  # type: ignore[type-arg]
         return np.array(
             [
-                self.crop_means_.get(row["crop_type"], self.global_mean_)
+                self.crop_means_.get(str(row["crop_type"]), self.global_mean_)
                 for _, row in X.iterrows()
             ]
         )
 
 
-def run_baseline():
+def run_baseline() -> None:
     df = pd.read_parquet("data/features/weekly_field_features")
     df = df.dropna(subset=["yield_kg_per_ha"])
 
@@ -54,7 +56,7 @@ def run_baseline():
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
 
-    metrics = compute_metrics(y_test.values, preds)
+    metrics = compute_metrics(np.asarray(y_test.values, dtype=float), preds)
 
     test_with_preds = test.copy()
     test_with_preds["_pred"] = preds

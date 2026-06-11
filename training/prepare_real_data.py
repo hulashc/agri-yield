@@ -46,7 +46,7 @@ RAW_DIR: Path = _raw_dir
 
 OUTPUT_PATH = "data/features/weekly_field_features.parquet"
 
-CROP_MAP = {
+CROP_MAP: dict[str, int] = {
     "Wheat": 0,
     "W-Barley": 2,
     "S-Barley": 3,
@@ -94,11 +94,19 @@ def extract_satellite_features(df: pd.DataFrame, year: int) -> pd.DataFrame:
 def load_climate(year: int) -> pd.DataFrame:
     """Load daily climate data for a given year and aggregate to growing season (Apr-Sep)."""
     climate_dir = RAW_DIR / "data" / "climate_data" / str(year)
-    var_map = {"tas": "temperature_2m_mean", "precip": "precipitation_sum",
-               "rsds": "shortwave_radiation_sum", "pet": "et0_fao_evapotranspiration",
-               "sfcWind": "wind_speed", "huss": "specific_humidity"}
+    var_map: dict[str, str] = {
+        "tas": "temperature_2m_mean",
+        "precip": "precipitation_sum",
+        "rsds": "shortwave_radiation_sum",
+        "pet": "et0_fao_evapotranspiration",
+        "sfcWind": "wind_speed",
+        "huss": "specific_humidity",
+    }
 
-    merged: pd.DataFrame | None = None
+    # Use a sentinel so mypy knows the variable is always pd.DataFrame after the loop
+    frames: list[pd.DataFrame] = []
+    first_merge: pd.DataFrame | None = None
+
     for fname in os.listdir(climate_dir):
         if not fname.endswith(".csv"):
             continue
@@ -113,11 +121,17 @@ def load_climate(year: int) -> pd.DataFrame:
         date_cols = [c for c in df.columns if c.startswith("X")]
         season_cols = [c for c in date_cols if int(c.split(".")[1]) in range(4, 10)]
         df[feat_name] = df[season_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        sub = df.groupby("grid_ID", as_index=False)[feat_name].mean()
-        merged = sub if merged is None else merged.merge(sub, on="grid_ID")
+        sub: pd.DataFrame = df.groupby("grid_ID", as_index=False)[feat_name].mean()
+        if first_merge is None:
+            first_merge = sub
+        else:
+            first_merge = first_merge.merge(sub, on="grid_ID")
+        frames.append(sub)
 
-    if merged is None:
+    if first_merge is None:
         return pd.DataFrame()
+    # first_merge is narrowed to pd.DataFrame here — mypy is satisfied
+    merged: pd.DataFrame = first_merge
     return merged
 
 
@@ -131,7 +145,7 @@ def load_soil() -> pd.DataFrame:
     ].first()
 
 
-def prepare():
+def prepare() -> pd.DataFrame:
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 
     all_rows = []
@@ -144,7 +158,7 @@ def prepare():
 
         for _, row in yield_df.iterrows():
             grid_id = row["grid_ID"]
-            crop_raw = row["Crop"]
+            crop_raw = str(row["Crop"])
             crop_enc = CROP_MAP.get(crop_raw, 3)
             soil_row = soil_df[soil_df["grid_ID"] == grid_id]
             climate_row = climate_feat[climate_feat["grid_ID"] == grid_id] if not climate_feat.empty else pd.DataFrame()
@@ -153,7 +167,7 @@ def prepare():
 
             sat_row = sat_feat[sat_feat["ID"] == row["ID"]]
 
-            feat = {
+            feat: dict[str, object] = {
                 "lat": lat,
                 "lon": lon,
                 "area_ha": 50.0,

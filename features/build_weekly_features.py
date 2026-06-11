@@ -28,7 +28,7 @@ RAW_DIR = Path("data/raw/nasa_power")
 OUT_PATH = Path("data/features/weekly_field_features.parquet")
 
 # NASA POWER column → feature name mapping
-COL_MAP = {
+COL_MAP: dict[str, str] = {
     "T2M_MAX": "air_temp_max",
     "T2M_MIN": "air_temp_min",
     "PRECTOTCORR": "precip_total",
@@ -37,7 +37,7 @@ COL_MAP = {
 }
 
 # Field metadata (mirrors nasa_power_historical.py)
-FIELD_META = {
+FIELD_META: dict[str, dict[str, object]] = {
     "F001": {"crop_type": "winter_wheat", "region": "Lincolnshire", "lat": 52.9135, "lon": -0.1736},
     "F002": {"crop_type": "oilseed_rape", "region": "Lincolnshire", "lat": 52.8389, "lon": -0.0325},
     "F003": {"crop_type": "sugar_beet", "region": "Lincolnshire", "lat": 52.7862, "lon": -0.1532},
@@ -49,8 +49,7 @@ FIELD_META = {
 }
 
 # Synthetic yield model: base yield per crop + weather sensitivity
-# Real labels would come from DEFRA / farm records — this gives plausible targets for training
-BASE_YIELD = {
+BASE_YIELD: dict[str, int] = {
     "winter_wheat": 8000,
     "oilseed_rape": 3500,
     "sugar_beet": 60000,
@@ -93,38 +92,46 @@ def aggregate_to_weekly(df: pd.DataFrame, field_id: str) -> pd.DataFrame:
     ).reset_index()
 
     # Soil proxies — derived from weather (no sensor data yet)
-    agg["soil_temp_mean"] = agg["air_temp_mean"] * 0.85
-    agg["soil_temp_std"] = agg["air_temp_std"].fillna(0) * 0.85
-    agg["moisture_mean"] = (agg["precip_total"] / 7).clip(0, 100)  # mm/day proxy
-    agg["moisture_std"] = agg["moisture_mean"] * 0.1
-    agg["ph_mean"] = 6.5  # typical UK arable soil
-    agg["nitrogen_mean"] = 180.0  # kg/ha typical application
-    agg["phosphorus_mean"] = 30.0
-    agg["potassium_mean"] = 200.0
+    agg = agg.assign(
+        soil_temp_mean=agg["air_temp_mean"] * 0.85,
+        soil_temp_std=agg["air_temp_std"].fillna(0) * 0.85,
+        moisture_mean=(agg["precip_total"] / 7).clip(0, 100),
+        moisture_std=(agg["precip_total"] / 7).clip(0, 100) * 0.1,
+        # Typed scalar constants via assign to avoid __setitem__ overload ambiguity
+        ph_mean=float(6.5),
+        nitrogen_mean=float(180.0),
+        phosphorus_mean=float(30.0),
+        potassium_mean=float(200.0),
+        # NDVI placeholders — replaced by real Kafka stream when ndvi_puller runs
+        latest_ndvi=float(0.6),
+        cloud_cover_pct=float(40.0),
+        ndvi_interpolated=int(0),
+        ndvi_proxied=int(1),
+    )
 
-    # NDVI placeholders — will be replaced by real Kafka stream when ndvi_puller runs
-    agg["latest_ndvi"] = 0.6
-    agg["cloud_cover_pct"] = 40.0
-    agg["ndvi_interpolated"] = 0
-    agg["ndvi_proxied"] = 1
-
-    agg["field_id"] = field_id
-
-    # Attach field metadata
     meta = FIELD_META[field_id]
-    agg["crop_type"] = meta["crop_type"]
-    agg["region"] = meta["region"]
-    agg["lat"] = meta["lat"]
-    agg["lon"] = meta["lon"]
+    crop_type: str = str(meta["crop_type"])
+    region: str = str(meta["region"])
+    lat: float = float(meta["lat"])  # type: ignore[arg-type]
+    lon: float = float(meta["lon"])  # type: ignore[arg-type]
+
+    agg = agg.assign(
+        field_id=field_id,
+        crop_type=crop_type,
+        region=region,
+        lat=lat,
+        lon=lon,
+    )
 
     # Synthetic yield label based on growing season weather
-    # UK harvest: wheat/barley/rape = Aug, sugar beet = Oct-Nov
-    base = BASE_YIELD[meta["crop_type"]]
+    base = BASE_YIELD[crop_type]
     rng = np.random.default_rng(seed=abs(hash(field_id)) % (2**32))
     noise = rng.normal(0, base * 0.08, len(agg))
     temp_effect = (agg["air_temp_mean"] - 10).clip(-5, 15) * (base * 0.005)
     rain_effect = (agg["precip_total"] - 15).clip(-10, 20) * (base * 0.002)
-    agg["yield_kg_per_ha"] = (base + temp_effect + rain_effect + noise).clip(base * 0.4, base * 1.6)
+    agg = agg.assign(
+        yield_kg_per_ha=(base + temp_effect + rain_effect + noise).clip(base * 0.4, base * 1.6)
+    )
 
     return agg
 
