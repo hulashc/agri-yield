@@ -12,6 +12,13 @@ PSI > 0.50  → red    (trigger retraining)
 Note: thresholds are intentionally wider than the classic 0.10/0.20
 because training data uses synthetic/proxy values. PSI is only meaningful
 once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
+
+Performance note:
+  load_reference_distribution() reads all NASA POWER Parquet files from disk.
+  This is EXPENSIVE and must NOT be called on every request.
+  The recommended pattern is to call _warm_reference_cache() at app startup
+  (see serving/app.py lifespan) and always pass reference_cache=_REFERENCE_CACHE
+  into evaluate_drift(). The fallback path (no cache) will log a warning.
 """
 
 import logging
@@ -28,7 +35,6 @@ PSI_AMBER = 0.25
 PSI_RED = 0.50
 
 # Minimum number of live samples required before PSI is meaningful.
-# Below this threshold we return green and skip computation entirely.
 MIN_CURRENT_SAMPLES = 30
 
 MONITORED_FEATURES = [
@@ -101,6 +107,9 @@ def load_reference_distribution(
 ) -> np.ndarray:
     """
     Load the reference distribution for a feature from saved Parquet files.
+
+    NOTE: This is a disk-read operation. Call it at startup only via
+    _warm_reference_cache() and never inside hot request paths.
     """
     root = Path(data_root)
     all_files = list(root.glob("*/[0-9][0-9][0-9][0-9].parquet"))
@@ -122,7 +131,7 @@ def load_reference_distribution(
         try:
             df = pd.read_parquet(f, columns=["date", col])
             dfs.append(df)
-        except Exception:
+        except Exception:  # noqa: BLE001
             continue
 
     if not dfs:
@@ -140,7 +149,20 @@ def evaluate_drift(
     """
     Run PSI for each monitored feature using a rolling buffer of live values.
     Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
+
+    Args:
+        field_id: Unique field identifier for per-field buffer tracking.
+        live_features: Dict of feature name → live value from the request.
+        reference_cache: Pre-loaded reference distributions (dict of feature → np.ndarray).
+                         Should be populated at app startup via _warm_reference_cache().
+                         If None, falls back to per-call disk reads (slow — avoid in production).
     """
+    if reference_cache is None:
+        logger.warning(
+            "evaluate_drift called without reference_cache — falling back to disk reads. "
+            "This is slow. Pass the startup-warmed cache from serving/app.py instead."
+        )
+
     psi_scores = {}
 
     for feature in MONITORED_FEATURES:
@@ -155,11 +177,12 @@ def evaluate_drift(
             PSI_SCORE.labels(feature_name=feature).set(0.0)
             continue
 
-        ref = (
-            reference_cache.get(feature)
-            if reference_cache
-            else load_reference_distribution(feature)
-        )
+        if reference_cache is not None:
+            ref = reference_cache.get(feature)
+        else:
+            # Fallback: per-request disk read (slow path — startup cache not available)
+            ref = load_reference_distribution(feature)
+
         if ref is None or len(ref) == 0:
             continue
 
