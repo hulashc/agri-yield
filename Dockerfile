@@ -1,11 +1,11 @@
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 WORKDIR /app
 
 RUN pip install uv
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --python /usr/local/bin/python3.13
 
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 WORKDIR /app
 
 COPY --from=builder /app/.venv ./.venv
