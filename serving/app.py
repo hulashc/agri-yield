@@ -44,10 +44,8 @@ _PREDICT_SEMAPHORE = asyncio.Semaphore(2)
 _FIELDS_DF: pd.DataFrame = pd.DataFrame()
 
 # Reference distribution cache — loaded once at startup, not per-request.
-# Eliminates the per-request Parquet scan that was hitting /fields hard.
 _REFERENCE_CACHE: dict = {}
 
-# Resolved path to the bundled static frontend
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -136,7 +134,6 @@ async def _predict_one(field_id: str, row: pd.Series) -> dict:
                 float(row["lon"]),
             )
             features = {**row.to_dict(), **live}
-            # Pass pre-warmed reference cache — no Parquet scan per request
             drift_result = evaluate_drift(field_id, features, reference_cache=_REFERENCE_CACHE)
             feat_df = pd.DataFrame([features])
             preds, lower, upper = model_module.predict(feat_df)
@@ -236,7 +233,7 @@ def health() -> dict:
 @app.get("/model/info")
 def model_info() -> dict:
     """
-    Returns model training metadata for the competition showcase panel.
+    Returns model training metadata.
     Includes RMSE, dataset source, training date, CI method, and feature list.
     """
     if not model_module.is_loaded():
@@ -264,7 +261,7 @@ def model_info() -> dict:
 def feature_importance() -> dict:
     """
     Returns feature importance scores from the mean model.
-    Sorted descending by importance. Used in the dashboard info panel.
+    Sorted descending by importance.
     """
     if not model_module.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded yet.")
@@ -275,6 +272,77 @@ def feature_importance() -> dict:
     return {
         "feature_importance": sorted_importance,
         "model_version": model_module.model_version(),
+    }
+
+
+@app.post("/predict/explain")
+async def predict_explain(request: PredictRequest) -> dict:
+    """
+    Return a prediction with feature-level contribution breakdown for a single field.
+
+    Each feature contribution is computed as:
+        contribution = feature_value * global_importance / total_importance
+
+    This gives a signed, normalised proxy for local influence. For full SHAP
+    values, install shap>=0.45 and replace this with shap.TreeExplainer.
+
+    Features are sorted by absolute contribution descending so the most
+    influential inputs appear first in the response.
+    """
+    if not model_module.is_loaded():
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+
+    field_meta = get_field_meta(request.field_id)
+
+    async with _PREDICT_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        live = await loop.run_in_executor(
+            None,
+            get_live_features,
+            request.field_id,
+            float(field_meta["lat"]),
+            float(field_meta["lon"]),
+        )
+
+    features = {**field_meta, **live}
+    feat_df = pd.DataFrame([features])
+    preds, lower, upper = model_module.predict(feat_df)
+
+    importance = model_module.get_feature_importance()
+    from training.utils.features import FEATURE_COLS  # local import to avoid circular at module level
+    row = feat_df.reindex(columns=FEATURE_COLS).fillna(0).iloc[0]
+
+    total_imp = sum(importance.values()) or 1.0
+    contributions = {
+        feat: round(float(row[feat]) * importance.get(feat, 0.0) / total_imp, 6)
+        for feat in FEATURE_COLS
+    }
+    sorted_contributions = dict(
+        sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
+    )
+    sorted_importance = dict(
+        sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    )
+
+    meta = model_module.get_bundle_meta()
+
+    return {
+        "field_id": request.field_id,
+        "predicted_yield_kg_ha": round(float(preds[0]), 1),
+        "lower_bound": round(float(lower[0]), 1),
+        "upper_bound": round(float(upper[0]), 1),
+        "confidence_level": 0.80,
+        "ci_method": "quantile" if meta.get("has_quantile_ci") else "heuristic",
+        "feature_contributions": sorted_contributions,
+        "feature_importance": sorted_importance,
+        "explanation_method": "feature_importance_proxy",
+        "explanation_note": (
+            "Contributions = feature_value × (global_importance / total_importance). "
+            "This is a linear proxy for local influence. "
+            "Install shap>=0.45 and use shap.TreeExplainer for true Shapley values."
+        ),
+        "model_version": model_module.model_version(),
+        "last_updated": datetime.now(UTC).isoformat(),
     }
 
 

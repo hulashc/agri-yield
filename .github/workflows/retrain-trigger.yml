@@ -1,0 +1,107 @@
+name: Retrain Model
+
+# -------------------------------------------------------------------------
+# Triggered manually (workflow_dispatch) or automatically when drift
+# monitoring emits a red alert.
+#
+# On red drift the monitoring layer can call:
+#   gh workflow run retrain-trigger.yml -f reason="drift_red:t2m_max_today"
+#
+# Guard: a lock file (retrain.lock) prevents concurrent or spam retrains.
+# The lock is removed at the end of a successful run.
+# -------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for retraining (e.g. drift_red, scheduled, manual)"
+        required: false
+        default: "manual"
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen --dev
+
+      - name: Download CYCleSS dataset (if available)
+        env:
+          CYCLESS_URL: ${{ secrets.CYCLESS_URL }}
+        run: |
+          if [ -n "$CYCLESS_URL" ]; then
+            echo "Downloading CYCleSS dataset..."
+            mkdir -p data/external
+            curl -fsSL "$CYCLESS_URL" -o data/external/cycless.csv && echo "Downloaded."
+          else
+            echo "CYCLESS_URL not set — training will use synthetic fallback."
+          fi
+
+      - name: Retrain model
+        run: uv run python training/train_and_export.py
+
+      - name: Quality gate
+        run: |
+          uv run python - <<'PYEOF'
+          import pickle, sys
+          try:
+              with open("model_bundle.pkl", "rb") as f:
+                  b = pickle.load(f)
+          except FileNotFoundError:
+              print("ERROR: model_bundle.pkl not found after training.")
+              sys.exit(1)
+
+          rmse = b.get("rmse", float("inf"))
+          has_lower = "lower" in b and b["lower"] is not None
+          has_upper = "upper" in b and b["upper"] is not None
+          source = b.get("dataset_source", "unknown")
+          trained_at = b.get("trained_at", "unknown")
+
+          print(f"RMSE        : {rmse:.1f} kg/ha")
+          print(f"Dataset     : {source}")
+          print(f"Trained at  : {trained_at}")
+          print(f"Has lower CI: {has_lower}")
+          print(f"Has upper CI: {has_upper}")
+
+          if rmse >= 2000:
+              print(f"GATE FAIL: RMSE {rmse:.1f} ≥ 2000 kg/ha threshold.")
+              sys.exit(1)
+          if not (has_lower and has_upper):
+              print("GATE FAIL: Quantile models missing from bundle.")
+              sys.exit(1)
+
+          print("Quality gate passed.")
+          PYEOF
+
+      - name: Run test suite on new model
+        run: uv run pytest tests/ -x -q --tb=short
+
+      - name: Commit updated model bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add model_bundle.pkl model.pkl
+          CHANGED=$(git diff --cached --name-only)
+          if [ -n "$CHANGED" ]; then
+            git commit -m "chore(model): retrain [reason=${{ github.event.inputs.reason }}] [skip ci]"
+            git push
+            echo "Model bundle committed and pushed."
+          else
+            echo "No model file changes — nothing to commit."
+          fi

@@ -9,20 +9,26 @@ PSI < 0.25  → green  (no action)
 PSI 0.25–0.50 → amber  (log warning)
 PSI > 0.50  → red    (trigger retraining)
 
-Note: thresholds are intentionally wider than the classic 0.10/0.20
-because training data uses synthetic/proxy values. PSI is only meaningful
-once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
+Drift buffer storage
+--------------------
+Live feature values are stored in a rolling buffer (BUFFER_SIZE per field/feature).
+By default the buffer lives in Redis so it survives container restarts and
+re-deploys. If REDIS_URL is not set, or if Redis is unreachable, the module
+falls back transparently to an in-process dict (same behaviour as before).
 
-Performance note:
-  load_reference_distribution() reads all NASA POWER Parquet files from disk.
-  This is EXPENSIVE and must NOT be called on every request.
-  The recommended pattern is to call _warm_reference_cache() at app startup
-  (see serving/app.py lifespan) and always pass reference_cache=_REFERENCE_CACHE
-  into evaluate_drift(). The fallback path (no cache) will log a warning.
+Performance note
+----------------
+load_reference_distribution() reads all NASA POWER Parquet files from disk.
+This is EXPENSIVE and must NOT be called on every request.
+The recommended pattern is to call _warm_reference_cache() at app startup
+(see serving/app.py lifespan) and always pass reference_cache=_REFERENCE_CACHE
+into evaluate_drift(). The fallback path (no cache) will log a warning.
 """
 
 import logging
+import os
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -48,13 +54,70 @@ MONITORED_FEATURES = [
     "ndvi_latest",
 ]
 
-# Rolling buffer: field_id → feature → list of recent values
-_live_buffer: dict[str, dict[str, list[float]]] = {}
 BUFFER_SIZE = 500
+REDIS_KEY_PREFIX = "agri:drift:buf:"
+REDIS_TTL_SECONDS = 86400 * 7  # 7 days
+
+# ---------------------------------------------------------------------------
+# Redis client (optional)
+# ---------------------------------------------------------------------------
+_REDIS_URL: str = os.getenv("REDIS_URL", "")
+_redis_client = None
+_redis_tried: bool = False
+
+
+def _get_redis():
+    """Return a Redis client, or None if unavailable / not configured."""
+    global _redis_client, _redis_tried
+    if _redis_tried:
+        return _redis_client
+    _redis_tried = True
+    if not _REDIS_URL:
+        logger.info("REDIS_URL not set — using in-memory drift buffer.")
+        return None
+    try:
+        import redis as redis_lib  # soft dependency
+        client = redis_lib.from_url(_REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+        client.ping()
+        _redis_client = client
+        logger.info("Drift buffer: Redis connected at %s", _REDIS_URL)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Redis unavailable (%s) — falling back to in-memory drift buffer.", exc
+        )
+        _redis_client = None
+    return _redis_client
+
+
+# ---------------------------------------------------------------------------
+# In-memory fallback buffer
+# ---------------------------------------------------------------------------
+_live_buffer: dict[str, dict[str, list[float]]] = {}
 
 
 def _append_to_buffer(field_id: str, feature: str, value: float) -> NDArray[np.float64]:
-    """Append a live value to the rolling buffer and return the current window."""
+    """
+    Append a live value to the rolling buffer and return the current window.
+
+    Writes to Redis when available (survives restarts). Falls back to
+    in-process dict transparently.
+    """
+    r = _get_redis()
+    key = f"{REDIS_KEY_PREFIX}{field_id}:{feature}"
+
+    if r is not None:
+        try:
+            r.rpush(key, value)
+            r.ltrim(key, -BUFFER_SIZE, -1)
+            r.expire(key, REDIS_TTL_SECONDS)
+            raw = r.lrange(key, 0, -1)
+            return np.array([float(v) for v in raw], dtype=float)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Redis buffer write failed (%s) — falling back to memory for this call.", exc
+            )
+
+    # In-memory fallback
     _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
     buf = _live_buffer[field_id][feature]
     buf.append(value)
@@ -63,19 +126,21 @@ def _append_to_buffer(field_id: str, feature: str, value: float) -> NDArray[np.f
     return np.array(buf, dtype=float)
 
 
-def compute_psi(reference: NDArray[np.float64], current: NDArray[np.float64], n_bins: int = 10) -> float:
+# ---------------------------------------------------------------------------
+# PSI computation
+# ---------------------------------------------------------------------------
+
+def compute_psi(
+    reference: NDArray[np.float64],
+    current: NDArray[np.float64],
+    n_bins: int = 10,
+) -> float:
     """
     Compute Population Stability Index between two distributions.
 
     PSI = Σ (actual% - expected%) × ln(actual% / expected%)
 
-    Args:
-        reference: Array of reference distribution values (training period)
-        current:   Array of current/live values
-        n_bins:    Number of histogram bins
-
-    Returns:
-        PSI score (float). Higher = more drift.
+    Returns 0.0 if either array is too small to be meaningful.
     """
     reference = reference[~np.isnan(reference)]
     current = current[~np.isnan(current)]
@@ -86,7 +151,9 @@ def compute_psi(reference: NDArray[np.float64], current: NDArray[np.float64], n_
     breakpoints = np.percentile(reference, np.linspace(0, 100, n_bins + 1))
     breakpoints = np.unique(breakpoints)
 
-    def safe_pct(arr: NDArray[np.float64], bins: NDArray[np.float64]) -> NDArray[np.float64]:
+    def safe_pct(
+        arr: NDArray[np.float64], bins: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         counts, _ = np.histogram(arr, bins=bins)
         pct = counts / len(arr)
         pct = np.where(pct == 0, 1e-4, pct)
@@ -139,26 +206,24 @@ def load_reference_distribution(
         return np.array([], dtype=float)
 
     combined = pd.concat(dfs)
-    # .to_numpy() always returns a plain np.ndarray (no ExtensionArray union),
-    # which satisfies the NDArray[np.float64] return type for mypy.
     return np.asarray(combined[col].dropna().to_numpy(dtype=float))
 
 
 def evaluate_drift(
     field_id: str,
     live_features: dict[str, object],
-    reference_cache: dict[str, NDArray[np.float64]] | None = None,
+    reference_cache: Optional[dict[str, NDArray[np.float64]]] = None,
 ) -> dict[str, object]:
     """
     Run PSI for each monitored feature using a rolling buffer of live values.
     Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
 
     Args:
-        field_id: Unique field identifier for per-field buffer tracking.
-        live_features: Dict of feature name → live value from the request.
-        reference_cache: Pre-loaded reference distributions (dict of feature → np.ndarray).
+        field_id:        Unique field identifier for per-field buffer tracking.
+        live_features:   Dict of feature name → live value from the request.
+        reference_cache: Pre-loaded reference distributions (feature → np.ndarray).
                          Should be populated at app startup via _warm_reference_cache().
-                         If None, falls back to per-call disk reads (slow — avoid in production).
+                         If None, falls back to per-call disk reads (slow — avoid in prod).
     """
     if reference_cache is None:
         logger.warning(
@@ -183,7 +248,6 @@ def evaluate_drift(
         if reference_cache is not None:
             ref = reference_cache.get(feature)
         else:
-            # Fallback: per-request disk read (slow path — startup cache not available)
             ref = load_reference_distribution(feature)
 
         if ref is None or len(ref) == 0:
