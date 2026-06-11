@@ -1,6 +1,6 @@
 # 🌾 Agri Yield — UK Field Intelligence
 
-![Live](https://img.shields.io/badge/status-live-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.13-blue) ![Docker](https://img.shields.io/badge/docker-ghcr.io-blue) [![CI](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml) [![Deploy](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml) [![Ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)
+![Live](https://img.shields.io/badge/status-live-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.13-blue) ![Docker](https://img.shields.io/badge/docker-ghcr.io-blue) [![CI](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/ci.yml) [![Deploy](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/deploy.yml) [![Retrain](https://github.com/hulashc/agri-yield/actions/workflows/retrain-trigger.yml/badge.svg)](https://github.com/hulashc/agri-yield/actions/workflows/retrain-trigger.yml) [![Ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)
 
 A production-grade **ML-powered crop yield prediction platform** for UK agricultural fields.
 Combines live weather data, soil attributes, and an XGBoost ensemble to predict yield (kg/ha)
@@ -19,12 +19,15 @@ per field — served via a real-time FastAPI backend and an interactive Leaflet 
 | **Real quantile CI** | Lower/upper bounds from q=0.10 and q=0.90 XGBoost quantile regressors — not a hardcoded fraction |
 | **Live weather per field** | Open-Meteo API called at inference time with 4-level fallback chain |
 | **PSI drift monitoring** | Population Stability Index computed per feature per field with green/amber/red levels |
+| **Redis-backed drift buffer** | Rolling drift history persisted in Redis (TTL 7d) — survives restarts and redeployments |
 | **Reference cache** | NASA POWER distributions loaded once at startup, not per-request |
+| **Feature explainability** | `/predict/explain` returns per-feature contribution scores alongside predictions |
 | **Feature importance** | Served at `/model/feature-importance` — sorted by XGBoost gain |
 | **Model metadata** | RMSE, dataset source, training date, CI method served at `/model/info` |
 | **CI/CD pipeline** | Train → Quality Gate → Test → Docker → GHCR → Render deploy → Health verify |
 | **Temporal split** | Train/test never shuffled — past fields train, future fields test |
-| **Concurrency guard** | `asyncio.Semaphore(2)` throttles live weather fetches on Render’s 1-CPU free tier |
+| **Concurrency guard** | `asyncio.Semaphore(2)` throttles live weather fetches on Render's 1-CPU free tier |
+| **Retraining workflow** | Manual or API-triggered retraining via GitHub Actions `workflow_dispatch` |
 
 ---
 
@@ -36,6 +39,7 @@ per field — served via a real-time FastAPI backend and an interactive Leaflet 
 | `/health` | GET | Build version, model status, quantile CI presence, fields count |
 | `/fields` | GET | All fields with live predictions, CI bounds, drift level |
 | `/predict` | POST | Single field prediction with CI, drift, weather, model version |
+| `/predict/explain` | POST | Prediction + per-feature contribution scores + global importance |
 | `/model/info` | GET | RMSE, dataset source, trained_at, CI method, feature list |
 | `/model/feature-importance` | GET | Feature importance scores sorted by XGBoost gain |
 | `/metrics` | GET | Prometheus metrics for Grafana |
@@ -53,7 +57,7 @@ per field — served via a real-time FastAPI backend and an interactive Leaflet 
 | RMSE | ~1759 kg/ha (real CYCleSS) / ~1724 kg/ha (synthetic fallback) |
 | Confidence interval | 80% — model-derived from quantile regressors (q0.10–q0.90) |
 | CI ordering | Enforced: lower ≤ mean ≤ upper per row after prediction |
-| Explainability | `/model/feature-importance` — XGBoost gain importance per feature |
+| Explainability | `/predict/explain` — feature contribution proxy; `/model/feature-importance` — XGBoost gain |
 
 The model is **retrained from scratch on every CI push to main** — no stale artefacts.
 All three models (mean, lower, upper) are saved as `model_bundle.pkl` and baked into
@@ -80,13 +84,30 @@ The `STALE DATA` badge appears when defaults are used.
 ## 🚨 Drift Monitoring
 
 PSI (Population Stability Index) is computed per-feature per-field against NASA POWER
-historical reference distributions loaded at startup:
+historical reference distributions loaded at startup.
+
+Rolling observation buffers are **persisted in Redis** (key: `drift:buf:<field_id>:<feature>`,
+capped at 500 values, 7-day TTL). Drift history survives container restarts and redeployments.
+If `REDIS_URL` is not set, the detector falls back to in-memory — monitoring still works,
+history resets on restart.
 
 | Level | PSI threshold | Action |
 |---|---|---|
 | 🟢 green | < 0.25 | No action |
 | 🟡 amber | 0.25 – 0.50 | Log warning, Prometheus metric |
 | 🔴 red | > 0.50 | Drift badge on field, retraining alert |
+
+To trigger retraining manually:
+
+```bash
+# From the GitHub Actions UI — Actions → Retrain Model → Run workflow
+# Or via API:
+curl -X POST \
+  -H "Authorization: token $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github.v3+json" \
+  https://api.github.com/repos/hulashc/agri-yield/actions/workflows/retrain-trigger.yml/dispatches \
+  -d '{"ref":"main"}'
+```
 
 ---
 
@@ -116,6 +137,7 @@ historical reference distributions loaded at startup:
 │  ├─ GET /         Leaflet map (113 UK fields)    │
 │  ├─ GET /fields    live predictions (all fields) │
 │  ├─ POST /predict  single field + CI + drift     │
+│  ├─ POST /predict/explain  prediction + contrib  │
 │  ├─ GET /model/info           training metadata  │
 │  ├─ GET /model/feature-importance  XGBoost gain │
 │  ├─ GET /health    build + model + fields status │
@@ -125,9 +147,12 @@ historical reference distributions loaded at startup:
 │    └─ Redis → Open-Meteo API → in-memory → default│
 │                                                  │
 │  monitoring/psi_detector.py                      │
-│    └─ PSI green/amber/red per feature per field   │
+│    └─ PSI green/amber/red per feature per field  │
+│    └─ Rolling buffer → Redis (TTL 7d)            │
 └─────────────────────────────────────────────────┘
 ```
+
+> Full interactive Mermaid diagram: [docs/architecture.md](docs/architecture.md)
 
 ---
 
@@ -165,6 +190,13 @@ See model metadata: [http://localhost:8000/model/info](http://localhost:8000/mod
 
 See feature importance: [http://localhost:8000/model/feature-importance](http://localhost:8000/model/feature-importance)
 
+Explain a prediction: 
+```bash
+curl -X POST http://localhost:8000/predict/explain \
+  -H 'Content-Type: application/json' \
+  -d '{"field_id": "field_001"}' | python3 -m json.tool
+```
+
 ### 4. (Optional) Run with Docker
 
 ```bash
@@ -190,6 +222,11 @@ curl https://agri-yield-latest.onrender.com/model/feature-importance | python3 -
 curl -X POST https://agri-yield-latest.onrender.com/predict \
   -H 'Content-Type: application/json' \
   -d '{"field_id": "field_001"}' | python3 -m json.tool
+
+# Explained prediction (feature contributions)
+curl -X POST https://agri-yield-latest.onrender.com/predict/explain \
+  -H 'Content-Type: application/json' \
+  -d '{"field_id": "field_001"}' | python3 -m json.tool
 ```
 
 ---
@@ -202,9 +239,12 @@ curl -X POST https://agri-yield-latest.onrender.com/predict \
 | `PICKLE_BUNDLE_PATH` | `/app/model_bundle.pkl` | Path to the quantile model bundle |
 | `PICKLE_MODEL_PATH` | `/app/model.pkl` | Legacy mean-only model (fallback) |
 | `FIELDS_CSV_PATH` | `/app/data/seed/uk_fields.csv` | Path to fields seed data |
-| `REDIS_URL` | `redis://localhost:6379` | Redis URL for weather caching |
+| `REDIS_URL` | `redis://localhost:6379` | Redis URL for weather caching **and drift buffer persistence** |
 | `RENDER_DEPLOY_HOOK` | — | Render deploy hook URL (GitHub secret) |
 | `RENDER_SERVICE_URL` | — | Render app URL for post-deploy health verify (GitHub secret) |
+
+> **Drift persistence:** Set `REDIS_URL` to any Redis instance (Render Redis, Upstash, Redis Cloud).
+> Without it, drift monitoring still works but history resets on restart.
 
 ---
 
@@ -241,12 +281,27 @@ push to main
 [7] Poll /health until 200 → print /model/info
 ```
 
+**`retrain-trigger.yml`** (manual or API dispatch):
+```
+workflow_dispatch
+    │
+    ▼
+[1] Train models
+    │
+    ▼
+[2] Quality gate: RMSE < 2000 + quantile CI present
+    │
+    ▼
+[3] Commit model_bundle.pkl to main [skip ci]
+```
+
 ---
 
 ## 📊 Monitoring
 
 - **Prometheus metrics** at `/metrics`
 - **PSI drift detection** — per feature per field, green/amber/red
+- **Redis-backed drift buffer** — persists rolling history across restarts (TTL 7 days)
 - **Reference distributions** — NASA POWER historical data, pre-loaded at startup
 - Recommended: connect Grafana to `/metrics` for live yield and latency dashboards
 
