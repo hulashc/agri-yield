@@ -10,11 +10,17 @@ PSI 0.25–0.50 → amber  (log warning)
 PSI > 0.50  → red    (trigger retraining)
 
 Note: thresholds are intentionally wider than the classic 0.10/0.20
-because training data uses synthetic/proxy values. PSI is only meaningful
-once a rolling buffer of live requests is available (MIN_CURRENT_SAMPLES).
+because training data uses synthetic/proxy values.
+
+Drift buffer persistence:
+  Live feature values are stored in Redis as capped lists, keyed by
+  field_id and feature name. If Redis is unavailable the detector
+  falls back to an in-memory dict (same behaviour as before this change,
+  with the loss that history resets on container restart).
 """
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -26,9 +32,6 @@ logger = logging.getLogger(__name__)
 
 PSI_AMBER = 0.25
 PSI_RED = 0.50
-
-# Minimum number of live samples required before PSI is meaningful.
-# Below this threshold we return green and skip computation entirely.
 MIN_CURRENT_SAMPLES = 30
 
 MONITORED_FEATURES = [
@@ -41,34 +44,77 @@ MONITORED_FEATURES = [
     "ndvi_latest",
 ]
 
-# Rolling buffer: field_id → feature → list of recent values
-_live_buffer: dict = {}
 BUFFER_SIZE = 500
+
+# ── Redis buffer setup ────────────────────────────────────────────────────────
+# If REDIS_URL is not set or Redis is unavailable, fall back to in-memory dict.
+REDIS_URL = os.getenv("REDIS_URL", "")
+_redis_client = None
+_memory_buffer: dict = {}  # fallback only
+
+
+def _get_redis():
+    """Return a Redis client (or None if unavailable)."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    if not REDIS_URL:
+        return None
+    try:
+        import redis  # noqa: PLC0415
+        client = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=1)
+        client.ping()
+        _redis_client = client
+        logger.info("Drift buffer: connected to Redis at %s", REDIS_URL)
+        return _redis_client
+    except Exception as exc:
+        logger.warning("Redis unavailable (%s) — drift buffer will use in-memory fallback.", exc)
+        return None
+
+
+def _redis_key(field_id: str, feature: str) -> str:
+    return f"drift:buffer:{field_id}:{feature}"
 
 
 def _append_to_buffer(field_id: str, feature: str, value: float) -> np.ndarray:
-    """Append a live value to the rolling buffer and return the current window."""
-    _live_buffer.setdefault(field_id, {}).setdefault(feature, [])
-    buf = _live_buffer[field_id][feature]
+    """
+    Append a live value to the rolling buffer and return the current window.
+
+    Tries Redis first (persistent across restarts).
+    Falls back to an in-memory dict if Redis is unavailable.
+    """
+    r = _get_redis()
+
+    if r is not None:
+        key = _redis_key(field_id, feature)
+        try:
+            pipe = r.pipeline()
+            pipe.rpush(key, value)
+            pipe.ltrim(key, -BUFFER_SIZE, -1)  # keep only the last BUFFER_SIZE values
+            pipe.lrange(key, 0, -1)
+            results = pipe.execute()
+            raw = results[2]  # lrange result
+            return np.array([float(v) for v in raw])
+        except Exception as exc:
+            logger.debug("Redis buffer write failed (%s) — using memory fallback.", exc)
+            # Drop through to in-memory
+
+    # In-memory fallback
+    _memory_buffer.setdefault(field_id, {}).setdefault(feature, [])
+    buf = _memory_buffer[field_id][feature]
     buf.append(value)
     if len(buf) > BUFFER_SIZE:
         buf.pop(0)
     return np.array(buf)
 
 
+# ── PSI computation ───────────────────────────────────────────────────────────
+
 def compute_psi(reference: np.ndarray, current: np.ndarray, n_bins: int = 10) -> float:
     """
     Compute Population Stability Index between two distributions.
 
     PSI = Σ (actual% - expected%) × ln(actual% / expected%)
-
-    Args:
-        reference: Array of reference distribution values (training period)
-        current:   Array of current/live values
-        n_bins:    Number of histogram bins
-
-    Returns:
-        PSI score (float). Higher = more drift.
     """
     reference = reference[~np.isnan(reference)]
     current = current[~np.isnan(current)]
@@ -100,7 +146,8 @@ def load_reference_distribution(
     feature: str, data_root: str = "data/raw/nasa_power"
 ) -> np.ndarray:
     """
-    Load the reference distribution for a feature from saved Parquet files.
+    Load the reference distribution for a single feature.
+    Kept for backward compatibility — prefer reference_cache.py at startup.
     """
     root = Path(data_root)
     all_files = list(root.glob("*/[0-9][0-9][0-9][0-9].parquet"))
@@ -132,6 +179,8 @@ def load_reference_distribution(
     return combined[col].dropna().values
 
 
+# ── Main evaluation entry point ───────────────────────────────────────────────
+
 def evaluate_drift(
     field_id: str,
     live_features: dict,
@@ -139,6 +188,10 @@ def evaluate_drift(
 ) -> dict:
     """
     Run PSI for each monitored feature using a rolling buffer of live values.
+
+    Buffer is Redis-backed (persistent) when REDIS_URL is set;
+    falls back to in-memory otherwise.
+
     Returns green until MIN_CURRENT_SAMPLES requests have been seen per field.
     """
     psi_scores = {}

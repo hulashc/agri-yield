@@ -1,10 +1,20 @@
 """
-XGBoost training script. Accepts a DVC dataset path, trains, evaluates,
-and registers the model to MLflow. Callable by Prefect.
+XGBoost training script — multi-model bundle with quantile confidence intervals.
+Trains three models:
+  - mean model  (XGBRegressor, standard MSE loss)
+  - lower model (XGBRegressor, quantile alpha=0.10)
+  - upper model (XGBRegressor, quantile alpha=0.90)
+
+Saves model_bundle.pkl with full metadata so /model/info can surface:
+  training timestamp, RMSE/MAE, CI coverage, interval width, top features,
+  split policy, n_train, n_test.
 """
 
 import argparse
 import os
+import pickle
+from datetime import UTC, datetime
+from pathlib import Path
 
 import mlflow
 import mlflow.xgboost
@@ -23,6 +33,19 @@ os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
 
 TARGET = "yield_kg_per_ha"
 REGISTERED_MODEL_NAME = "agri-yield-xgb"
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+BUNDLE_PATH = _REPO_ROOT / "model_bundle.pkl"
+PICKLE_PATH = _REPO_ROOT / "model.pkl"
+
+
+def _build_quantile_params(base_params: dict, alpha: float) -> dict:
+    """Return XGBoost params configured for quantile regression at `alpha`."""
+    p = {k: v for k, v in base_params.items() if k not in ("random_state",)}
+    p["objective"] = "reg:quantileerror"
+    p["quantile_alpha"] = alpha
+    p["seed"] = base_params.get("random_state", 42)
+    return p
 
 
 def train(
@@ -61,6 +84,10 @@ def train(
     X_test = test_df[feature_cols]
     y_test = test_df[TARGET]
 
+    n_train = len(X_train)
+    n_test = len(X_test)
+
+    # ── Cross-validation on mean model ──────────────────────────────────────
     tscv = TimeSeriesSplit(n_splits=n_cv_folds)
     cv_rmse_scores, cv_mae_scores, cv_r2_scores = [], [], []
     X_train_arr = X_train.values
@@ -80,20 +107,99 @@ def train(
         cv_mae_scores.append(fold_metrics["mae"])
         cv_r2_scores.append(fold_metrics["r2"])
 
-    model = xgb.XGBRegressor(**params)
-    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-    test_preds = model.predict(X_test)
+    # ── Train mean model ─────────────────────────────────────────────────────
+    mean_model = xgb.XGBRegressor(**params)
+    mean_model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+    test_preds = mean_model.predict(X_test)
     holdout_metrics = compute_metrics(y_test.values, test_preds)
 
+    # ── Global feature importance (XGBoost gain, top 15) ────────────────────
+    importances = mean_model.feature_importances_
+    top_features = sorted(
+        [
+            {"rank": i + 1, "feature": name, "importance": round(float(imp), 6), "source": "xgboost_gain"}
+            for i, (name, imp) in enumerate(
+                sorted(zip(feature_cols, importances), key=lambda x: x[1], reverse=True)[:15]
+            )
+        ],
+        key=lambda x: x["rank"],
+    )
+
+    # ── Train quantile models (10th and 90th percentile) ─────────────────────
+    lower_params = _build_quantile_params(params, alpha=0.10)
+    upper_params = _build_quantile_params(params, alpha=0.90)
+
+    lower_model = xgb.XGBRegressor(**lower_params)
+    lower_model.fit(X_train, y_train, verbose=False)
+    lower_preds = lower_model.predict(X_test)
+
+    upper_model = xgb.XGBRegressor(**upper_params)
+    upper_model.fit(X_train, y_train, verbose=False)
+    upper_preds = upper_model.predict(X_test)
+
+    # Quantile crossing correction: ensure lower <= mean <= upper per sample
+    lower_preds = np.minimum(lower_preds, test_preds)
+    upper_preds = np.maximum(upper_preds, test_preds)
+
+    quantile_rmse_lower = float(np.sqrt(np.mean((lower_preds - y_test.values) ** 2)))
+    quantile_rmse_upper = float(np.sqrt(np.mean((upper_preds - y_test.values) ** 2)))
+    coverage = float(np.mean((y_test.values >= lower_preds) & (y_test.values <= upper_preds)))
+    avg_interval_width = float(np.mean(upper_preds - lower_preds))
+
+    # ── Per-crop metrics ─────────────────────────────────────────────────────
     test_df_copy = test_df.copy()
     test_df_copy["_pred"] = test_preds
     per_crop_metrics = compute_metrics_by_crop(test_df_copy, TARGET, "_pred")
 
-    with mlflow.start_run(run_name="xgboost_run") as run:
+    # ── Save model bundle (enriched metadata for /model/info) ─────────────────
+    trained_at = datetime.now(UTC).isoformat()
+    bundle = {
+        "mean_model": mean_model,
+        "lower_model": lower_model,
+        "upper_model": upper_model,
+        # — Metadata surfaced by /model/info —
+        "model_version": f"bundle-{trained_at[:10]}",
+        "trained_at": trained_at,
+        "split_policy": "temporal_train_test_split",
+        "n_train": n_train,
+        "n_test": n_test,
+        "feature_cols": feature_cols,
+        "holdout_rmse": round(holdout_metrics["rmse"], 4),
+        "holdout_mae": round(holdout_metrics["mae"], 4),
+        "holdout_r2": round(holdout_metrics["r2"], 4),
+        "coverage_80pct": round(coverage, 4),
+        "avg_interval_width_kg_ha": round(avg_interval_width, 1),
+        "quantile_lower": 0.10,
+        "quantile_upper": 0.90,
+        "top_features": top_features,
+        "dvc_commit": dvc_commit,
+    }
+    with open(BUNDLE_PATH, "wb") as f:
+        pickle.dump(bundle, f)
+    # Also save mean model as standalone pickle for backward compatibility
+    with open(PICKLE_PATH, "wb") as f:
+        pickle.dump(mean_model, f)
+
+    print(f"\nModel bundle saved to {BUNDLE_PATH}")
+    print(f"Trained at:            {trained_at}")
+    print(f"n_train={n_train}  n_test={n_test}")
+    print(f"Holdout RMSE:          {holdout_metrics['rmse']:.4f} kg/ha")
+    print(f"Holdout MAE:           {holdout_metrics['mae']:.4f} kg/ha")
+    print(f"CI coverage (80% band): {coverage:.1%}")
+    print(f"Avg interval width:    {avg_interval_width:.1f} kg/ha")
+
+    # ── MLflow logging ───────────────────────────────────────────────────────
+    with mlflow.start_run(run_name="xgboost_quantile_run") as run:
         mlflow.log_params(params)
         mlflow.log_param("dvc_dataset_commit", dvc_commit)
         mlflow.log_param("n_cv_folds", n_cv_folds)
         mlflow.log_param("feature_count", len(feature_cols))
+        mlflow.log_param("quantile_lower", 0.10)
+        mlflow.log_param("quantile_upper", 0.90)
+        mlflow.log_param("n_train", n_train)
+        mlflow.log_param("n_test", n_test)
+        mlflow.log_param("split_policy", "temporal_train_test_split")
+        mlflow.log_param("trained_at", trained_at)
 
         for i, (rmse, mae, r2) in enumerate(zip(cv_rmse_scores, cv_mae_scores, cv_r2_scores)):
             mlflow.log_metric(f"cv_fold_{i}_rmse", rmse)
@@ -107,13 +213,16 @@ def train(
         mlflow.log_metric("holdout_rmse", holdout_metrics["rmse"])
         mlflow.log_metric("holdout_mae", holdout_metrics["mae"])
         mlflow.log_metric("holdout_r2", holdout_metrics["r2"])
+        mlflow.log_metric("quantile_rmse_lower", quantile_rmse_lower)
+        mlflow.log_metric("quantile_rmse_upper", quantile_rmse_upper)
+        mlflow.log_metric("ci_coverage_80pct", coverage)
+        mlflow.log_metric("ci_avg_width_kg_ha", avg_interval_width)
 
         for crop, metrics in per_crop_metrics.items():
             for k, v in metrics.items():
                 mlflow.log_metric(f"{crop}_{k}", v)
 
-        # MLflow v3: log_model returns a LoggedModel with model_uri
-        logged = mlflow.xgboost.log_model(model, name="model")
+        logged = mlflow.xgboost.log_model(mean_model, name="model")
         model_uri = logged.model_uri
         run_id = run.info.run_id
 
@@ -125,12 +234,8 @@ def train(
             alias="challenger",
             version=result.version,
         )
-        print(
-            f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' \u2192 alias=challenger"
-        )
+        print(f"Model v{result.version} registered as '{REGISTERED_MODEL_NAME}' → alias=challenger")
         print(f"Run ID: {run_id}")
-        print(f"Model URI: {model_uri}")
-        print(f"Holdout RMSE: {holdout_metrics['rmse']:.4f}")
         return run_id, holdout_metrics
 
 

@@ -39,32 +39,15 @@ jobs:
         run: uv run python training/train_and_export.py
 
       - name: Assert model quality gate (RMSE < 2000 kg/ha)
-        run: |
-          uv run python - <<'EOF'
-          import pickle, numpy as np, pandas as pd
-          from training.utils.features import FEATURE_COLS
-          from training.utils.splits import temporal_train_test_split
+        run: uv run python scripts/quality_gate.py
 
-          TARGET = "yield_kg_per_ha"
-          df = pd.read_parquet("data/features/weekly_field_features.parquet")
-          df = df.dropna(subset=[TARGET])
-          for col in FEATURE_COLS:
-              if col not in df.columns:
-                  df[col] = 0
-          df["week_start"] = pd.to_datetime(
-              df["year"].astype(str) + "-W" + df["week_of_year"].astype(str).str.zfill(2) + "-1",
-              format="%G-W%V-%u",
-              errors="coerce",
-          )
-          _, test_df = temporal_train_test_split(df)
-          with open("model.pkl", "rb") as f:
-              model = pickle.load(f)
-          preds = model.predict(test_df[FEATURE_COLS])
-          rmse = float(np.sqrt(np.mean((test_df[TARGET].values - preds) ** 2)))
-          print(f"Quality gate RMSE: {rmse:.2f} kg/ha")
-          assert rmse < 2000, f"RMSE {rmse:.2f} exceeds threshold of 2000 kg/ha — failing CI"
-          print("Quality gate passed.")
-          EOF
+      - name: Upload quality gate result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-result
+          path: scripts/quality_gate_result.json
+          if-no-files-found: ignore
 
       - name: Run tests
         run: uv run python -m pytest tests/ -v --tb=short
