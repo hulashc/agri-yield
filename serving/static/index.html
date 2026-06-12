@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en-GB" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -75,6 +75,15 @@
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
     #live-clock { font-variant-numeric: tabular-nums; margin-left: 6px; color: var(--green); opacity: 0.75; }
 
+    /* UK region badge */
+    .uk-badge {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.18);
+      font-size: 0.68rem; font-weight: 600; color: var(--blue);
+      margin-left: 6px; flex-shrink: 0; letter-spacing: 0.04em;
+    }
+
     /* last-updated bar */
     #last-updated-bar {
       position: absolute; bottom: 0; left: 0; right: 0;
@@ -112,13 +121,14 @@
     }
     .filter-btn:hover { color: var(--text); background: var(--surface2); }
     .filter-btn.active { color: var(--bg); font-weight: 600; }
-    .filter-btn[data-crop="all"].active        { background: var(--text);   border-color: var(--text); }
+    .filter-btn[data-crop="all"].active          { background: var(--text);   border-color: var(--text); }
     .filter-btn[data-crop="winter_wheat"].active,
     .filter-btn[data-crop="spring_wheat"].active  { background: var(--green);  border-color: var(--green); }
     .filter-btn[data-crop="winter_barley"].active,
     .filter-btn[data-crop="spring_barley"].active { background: var(--yellow); border-color: var(--yellow); }
     .filter-btn[data-crop="oilseed_rape"].active  { background: var(--orange); border-color: var(--orange); }
     .filter-btn[data-crop="sugar_beet"].active    { background: var(--blue);   border-color: var(--blue); }
+    .filter-btn[data-crop="potato"].active        { background: var(--purple); border-color: var(--purple); }
     .filter-divider { width: 1px; height: 18px; background: var(--border); }
     .filter-btn[data-view="yield"].active  { background: var(--teal);   border-color: var(--teal); }
     .filter-btn[data-view="crop"].active   { background: var(--purple); border-color: var(--purple); }
@@ -175,7 +185,7 @@
     }
 
     /* yield section */
-    #panel-yield { padding: 16px; border-bottom: 1px solid var(--border); }
+    #panel-yield  { padding: 16px; border-bottom: 1px solid var(--border); }
     .yield-main  { display: flex; align-items: flex-end; gap: 6px; }
     .yield-num   { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1; transition: color 0.4s; }
     .yield-unit  { font-size: 0.75rem; color: var(--muted); padding-bottom: 5px; }
@@ -291,6 +301,7 @@
       #filter-bar { top: 8px; gap: 4px; padding: 4px 8px; }
       .filter-btn { padding: 3px 9px; font-size: 0.68rem; }
       #live-clock { display: none; }
+      .uk-badge { display: none; }
     }
   </style>
 </head>
@@ -311,6 +322,13 @@
         <div class="logo-tag">UK Field Intelligence</div>
       </div>
     </div>
+    <div class="uk-badge">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+        <circle cx="6.5" cy="6.5" r="6" stroke="currentColor" stroke-width="1"/>
+        <path d="M1 6.5h11M6.5 1v11M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
+      </svg>
+      United Kingdom only
+    </div>
     <div id="stats-strip">
       <div class="stat"><span class="stat-val" id="s-fields">&#x2014;</span><span class="stat-lbl">Fields</span></div>
       <div class="stat"><span class="stat-val green" id="s-avg">&#x2014;</span><span class="stat-lbl">Avg yield kg/ha</span></div>
@@ -328,11 +346,13 @@
     <div id="map"></div>
 
     <div id="filter-bar">
-      <button class="filter-btn active" data-crop="all">All</button>
-      <button class="filter-btn" data-crop="winter_wheat">Wheat</button>
-      <button class="filter-btn" data-crop="winter_barley">Barley</button>
-      <button class="filter-btn" data-crop="oilseed_rape">OSR</button>
+      <button class="filter-btn active" data-crop="all">All crops</button>
+      <button class="filter-btn" data-crop="winter_wheat">Winter Wheat</button>
+      <button class="filter-btn" data-crop="winter_barley">Winter Barley</button>
+      <button class="filter-btn" data-crop="spring_barley">Spring Barley</button>
+      <button class="filter-btn" data-crop="oilseed_rape">Oilseed Rape</button>
       <button class="filter-btn" data-crop="sugar_beet">Sugar Beet</button>
+      <button class="filter-btn" data-crop="potato">Potato</button>
       <div class="filter-divider"></div>
       <button class="filter-btn active" data-view="yield">Yield</button>
       <button class="filter-btn" data-view="crop">Crop</button>
@@ -361,9 +381,9 @@
         <!-- OVERVIEW TAB -->
         <div id="tab-overview" class="tab-content active">
           <div class="panel-meta">
-            <div class="meta-cell"><span class="meta-lbl">Region</span><span class="meta-val" id="p-region">&#x2014;</span></div>
+            <div class="meta-cell"><span class="meta-lbl">UK Region</span><span class="meta-val" id="p-region">&#x2014;</span></div>
             <div class="meta-cell"><span class="meta-lbl">Area</span><span class="meta-val" id="p-area">&#x2014;</span></div>
-            <div class="meta-cell"><span class="meta-lbl">Coordinates</span><span class="meta-val" id="p-coords">&#x2014;</span></div>
+            <div class="meta-cell"><span class="meta-lbl">Grid Ref</span><span class="meta-val" id="p-coords">&#x2014;</span></div>
             <div class="meta-cell"><span class="meta-lbl">Soil Type</span><span class="meta-val" id="p-soil">&#x2014;</span></div>
           </div>
           <div id="panel-yield">
@@ -375,8 +395,8 @@
             <div class="yield-bar-track"><div class="yield-bar-fill" id="p-bar" style="width:0%"></div></div>
           </div>
           <div id="panel-weather">
-            <div class="wx-cell"><div class="wx-icon">&#127777;</div><div class="wx-val" id="wx-temp">&#x2014;</div><div class="wx-lbl">Temperature</div></div>
-            <div class="wx-cell"><div class="wx-icon">&#127783;</div><div class="wx-val" id="wx-rain">&#x2014;</div><div class="wx-lbl">Precipitation</div></div>
+            <div class="wx-cell"><div class="wx-icon">&#127777;</div><div class="wx-val" id="wx-temp">&#x2014;</div><div class="wx-lbl">Temp (&#176;C)</div></div>
+            <div class="wx-cell"><div class="wx-icon">&#127783;</div><div class="wx-val" id="wx-rain">&#x2014;</div><div class="wx-lbl">Rainfall (mm)</div></div>
             <div class="wx-cell"><div class="wx-icon">&#9728;</div><div class="wx-val" id="wx-rad">&#x2014;</div><div class="wx-lbl">Solar Rad.</div></div>
           </div>
           <div id="wx-source-row">
@@ -436,7 +456,7 @@
           <path d="M20 24L15 19" stroke="#14532d" stroke-width="1.5" stroke-linecap="round"/>
           <path d="M20 20L25 15" stroke="#14532d" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        <div class="overlay-title">Agri Yield Intelligence</div>
+        <div class="overlay-title">Agri Yield &#x2014; UK Field Intelligence</div>
         <div class="overlay-sub" id="overlay-status">Connecting to model&#x2026;</div>
         <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
       </div>
@@ -449,28 +469,51 @@
 (function () {
   /* ── constants ── */
   const REFRESH_INTERVAL = 60; // seconds
+
+  // UK-only crop types recognised by AHDB and DEFRA
   const CROP_COLORS = {
-    winter_wheat: '#4ade80', spring_wheat: '#86efac',
-    winter_barley: '#facc15', spring_barley: '#fde047',
-    oilseed_rape: '#fb923c', sugar_beet: '#38bdf8', potato: '#a78bfa',
+    winter_wheat:  '#4ade80',
+    spring_wheat:  '#86efac',
+    winter_barley: '#facc15',
+    spring_barley: '#fde047',
+    oilseed_rape:  '#fb923c',
+    sugar_beet:    '#38bdf8',
+    potato:        '#a78bfa',
   };
   const CROP_LABELS = {
-    winter_wheat: 'Winter Wheat', spring_wheat: 'Spring Wheat',
-    winter_barley: 'Winter Barley', spring_barley: 'Spring Barley',
-    oilseed_rape: 'Oilseed Rape', sugar_beet: 'Sugar Beet', potato: 'Potato',
+    winter_wheat:  'Winter Wheat',
+    spring_wheat:  'Spring Wheat',
+    winter_barley: 'Winter Barley',
+    spring_barley: 'Spring Barley',
+    oilseed_rape:  'Oilseed Rape',
+    sugar_beet:    'Sugar Beet',
+    potato:        'Potato',
   };
+
+  // Map weather_source keys returned by API to human labels
   const WX_SOURCES = {
-    redis:    { label: 'Open-Meteo (Redis cache)',   color: '#38bdf8', live: true },
-    live:     { label: 'Open-Meteo (live API)',       color: '#4ade80', live: true },
-    memory:   { label: 'In-memory cache',             color: '#facc15', live: false },
-    default:  { label: 'UK seasonal defaults',        color: '#f87171', live: false },
-    unknown:  { label: 'Weather source unknown',      color: '#64748b', live: false },
+    redis_cache:      { label: 'Open-Meteo \u2014 Redis cache',    color: '#38bdf8', live: true },
+    live_api:         { label: 'Open-Meteo \u2014 live API call',  color: '#4ade80', live: true },
+    in_memory:        { label: 'In-memory weather cache',          color: '#facc15', live: false },
+    seasonal_default: { label: 'UK seasonal climatology',          color: '#f87171', live: false },
+    // legacy keys kept for backwards compatibility
+    redis:            { label: 'Open-Meteo \u2014 Redis cache',    color: '#38bdf8', live: true },
+    live:             { label: 'Open-Meteo \u2014 live API call',  color: '#4ade80', live: true },
+    memory:           { label: 'In-memory weather cache',          color: '#facc15', live: false },
+    default:          { label: 'UK seasonal climatology',          color: '#f87171', live: false },
+    unknown:          { label: 'Weather source unknown',           color: '#64748b', live: false },
   };
+
+  // UK bounding box — map cannot be panned outside this region
+  const UK_BOUNDS = L.latLngBounds(
+    L.latLng(49.5, -10.5),   // SW: south of Scilly Isles, west of Ireland
+    L.latLng(61.0,  2.5)    // NE: north of Shetland, east of East Anglia
+  );
 
   /* ── state ── */
   let allFields = [], markers = [], activeCrop = 'all', activeView = 'yield';
   let minYield = 0, maxYield = 1;
-  let refreshTimer = null, countdownTimer = null, countdownVal = REFRESH_INTERVAL;
+  let countdownTimer = null, countdownVal = REFRESH_INTERVAL;
   let currentField = null;
 
   /* ── helpers ── */
@@ -482,7 +525,7 @@
     }
     const r = Math.round(250 + (74 - 250) * ((t - 0.5) / 0.5));
     const g = Math.round(204 + (222 - 204) * ((t - 0.5) / 0.5));
-    const b = Math.round(21 + (128 - 21) * ((t - 0.5) / 0.5));
+    const b = Math.round(21  + (128 - 21)  * ((t - 0.5) / 0.5));
     return `rgb(${r},${g},${b})`;
   }
   function markerColor(field, viewMode, minY, maxY) {
@@ -504,17 +547,22 @@
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
       <circle cx="${s/2}" cy="${s/2}" r="${r}" fill="${color}" fill-opacity="0.22" stroke="${color}" stroke-width="2"/>
       <circle cx="${s/2}" cy="${s/2}" r="${r*0.42}" fill="${color}"/></svg>`;
-    return L.divIcon({ html: svg, className: '', iconSize: [s, s], iconAnchor: [s/2, s/2], popupAnchor: [0, -s/2] });
+    return L.divIcon({ html: svg, className: '', iconSize: [s,s], iconAnchor: [s/2,s/2], popupAnchor: [0,-s/2] });
   }
   function fmt(val, decimals, suffix) {
     if (val == null) return '\u2014';
     return Number(val).toFixed(decimals) + suffix;
   }
+  // Always display time in British time (en-GB, 24-hour)
   function nowStr() {
-    return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  }
+  // Format a coordinate as a compact decimal for GB fields
+  function fmtCoord(lat, lon) {
+    return lat.toFixed(4) + '\u00b0N, ' + Math.abs(lon).toFixed(4) + (lon < 0 ? '\u00b0W' : '\u00b0E');
   }
 
-  /* ── live clock ── */
+  /* ── live clock (en-GB 24h) ── */
   function startClock() {
     const el = document.getElementById('live-clock');
     function tick() { el.textContent = nowStr(); }
@@ -522,12 +570,22 @@
   }
   startClock();
 
-  /* ── map ── */
-  const map = L.map('map', { center: [54, -2.5], zoom: 6, zoomControl: true });
+  /* ── map — locked to UK ── */
+  const map = L.map('map', {
+    center: [54.5, -3.0],
+    zoom: 6,
+    minZoom: 5,
+    maxZoom: 15,
+    maxBounds: UK_BOUNDS,
+    maxBoundsViscosity: 0.85,
+    zoomControl: true,
+  });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: 'abcd', maxZoom: 19,
   }).addTo(map);
+  // Constrain initial view to UK on first load
+  map.fitBounds(UK_BOUNDS);
 
   /* ── progress overlay ── */
   function setProgress(pct, msg) {
@@ -538,7 +596,7 @@
   /* ── fetch + render ── */
   function fetchFields(attempt) {
     attempt = attempt || 1;
-    setProgress(10 + Math.min(attempt * 5, 50), attempt === 1 ? 'Loading field data\u2026' : 'Model loading, retrying\u2026');
+    setProgress(10 + Math.min(attempt * 5, 50), attempt === 1 ? 'Loading UK field data\u2026' : 'Model loading, retrying\u2026');
     fetch('/fields')
       .then(r => {
         if (r.status === 503 && attempt < 10) { setTimeout(() => fetchFields(attempt + 1), 2000); return null; }
@@ -551,7 +609,6 @@
         document.getElementById('s-model').textContent = data.model_version || '\u2014';
         computeStats(); buildMarkers(); updateLegend();
         document.getElementById('last-fetched-time').textContent = nowStr();
-        // if a panel was open, refresh it silently
         if (currentField) {
           const fresh = allFields.find(f => f.field_id === currentField.field_id);
           if (fresh) { currentField = fresh; renderOverviewData(fresh); }
@@ -585,7 +642,6 @@
     fetchFields();
     startCountdown();
   };
-  // start countdown after first load — wait 2s for initial overlay to clear
   setTimeout(startCountdown, 2000);
 
   /* ── stats strip ── */
@@ -597,8 +653,9 @@
     const best = allFields.reduce((a, b) => (b.predicted_yield_kg_ha || 0) > (a.predicted_yield_kg_ha || 0) ? b : a);
     const driftCount = allFields.filter(f => f.drift_warning).length;
     document.getElementById('s-fields').textContent = allFields.length;
-    document.getElementById('s-avg').textContent = avg.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    document.getElementById('s-best-val').textContent = (best.predicted_yield_kg_ha || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    // en-GB locale with thousands separator
+    document.getElementById('s-avg').textContent = avg.toLocaleString('en-GB', { maximumFractionDigits: 0 });
+    document.getElementById('s-best-val').textContent = (best.predicted_yield_kg_ha || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
     document.getElementById('s-best-lbl').textContent = best.name || 'Top field';
     const driftEl = document.getElementById('s-drift');
     driftEl.textContent = driftCount;
@@ -608,14 +665,18 @@
   /* ── markers ── */
   function buildMarkers() {
     markers.forEach(m => map.removeLayer(m.layer)); markers = [];
+    const cropKey = activeCrop.replace('winter_', '').replace('spring_', '');
     const filtered = activeCrop === 'all' ? allFields
-      : allFields.filter(f => f.crop_type === activeCrop || f.crop_type.includes(activeCrop.replace('winter_', '').replace('spring_', '')));
+      : allFields.filter(f => f.crop_type === activeCrop || f.crop_type.includes(cropKey));
     filtered.forEach(f => {
       const color = markerColor(f, activeView, minYield, maxYield);
       const radius = Math.max(8, Math.min(15, 8 + (f.area_ha / 30)));
       const layer = L.marker([f.lat, f.lon], { icon: makeIcon(color, radius) }).addTo(map);
       layer.on('click', () => openPanel(f));
-      layer.bindTooltip(`<strong>${f.name}</strong><br>${(CROP_LABELS[f.crop_type] || f.crop_type)} &mdash; ${f.area_ha} ha`, { direction: 'top', offset: [0, -10] });
+      layer.bindTooltip(
+        `<strong>${f.name}</strong><br>${CROP_LABELS[f.crop_type] || f.crop_type} \u2014 ${f.area_ha} ha`,
+        { direction: 'top', offset: [0, -10] }
+      );
       markers.push({ layer, field: f });
     });
   }
@@ -623,18 +684,18 @@
   /* ── legend ── */
   function updateLegend() {
     const title = document.getElementById('legend-title');
-    const body = document.getElementById('legend-body');
+    const body  = document.getElementById('legend-body');
     if (activeView === 'yield') {
       title.textContent = 'Colour by yield';
-      body.innerHTML = `<div class="leg-gradient"></div><div class="leg-gradient-labels"><span>${Math.round(minYield).toLocaleString()}</span><span>${Math.round(maxYield).toLocaleString()} kg/ha</span></div>`;
+      body.innerHTML = `<div class="leg-gradient"></div><div class="leg-gradient-labels"><span>${Math.round(minYield).toLocaleString('en-GB')}</span><span>${Math.round(maxYield).toLocaleString('en-GB')} kg/ha</span></div>`;
     } else if (activeView === 'crop') {
-      title.textContent = 'Crop type';
+      title.textContent = 'UK crop type';
       const crops = [...new Set(allFields.map(f => f.crop_type))];
       body.innerHTML = crops.map(c => `<div class="leg-row"><div class="leg-dot" style="background:${cropColor(c)}"></div>${CROP_LABELS[c] || c}</div>`).join('');
     } else {
       title.textContent = 'Drift level';
-      body.innerHTML = [['#4ade80', 'No drift'], ['#facc15', 'Low drift'], ['#f87171', 'High drift']]
-        .map(([c, l]) => `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${l}</div>`).join('');
+      body.innerHTML = [['#4ade80','No drift'],['#facc15','Low drift'],['#f87171','High drift']]
+        .map(([c,l]) => `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${l}</div>`).join('');
     }
   }
 
@@ -668,23 +729,22 @@
   function renderOverviewData(f) {
     const y = f.predicted_yield_kg_ha;
     const color = y != null ? markerColor(f, 'yield', minYield, maxYield) : '#94a3b8';
-    const pct = y != null ? Math.max(4, Math.round(((y - minYield) / Math.max(maxYield - minYield, 1)) * 100)) : 0;
-    document.getElementById('p-yield').textContent = y != null ? y.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
+    const pct   = y != null ? Math.max(4, Math.round(((y - minYield) / Math.max(maxYield - minYield, 1)) * 100)) : 0;
+    document.getElementById('p-yield').textContent = y != null
+      ? y.toLocaleString('en-GB', { maximumFractionDigits: 0 }) : '\u2014';
     document.getElementById('p-yield').style.color = color;
     document.getElementById('p-ci').textContent = f.lower_bound != null
-      ? `80% CI: ${f.lower_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} \u2013 ${f.upper_bound.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg/ha` : '';
+      ? `80% CI: ${f.lower_bound.toLocaleString('en-GB', { maximumFractionDigits: 0 })} \u2013 ${f.upper_bound.toLocaleString('en-GB', { maximumFractionDigits: 0 })} kg/ha` : '';
     const bar = document.getElementById('p-bar');
     bar.style.background = color;
     setTimeout(() => { bar.style.width = pct + '%'; }, 50);
     document.getElementById('wx-temp').textContent = fmt(f.temp_c, 1, '\u00b0C');
     document.getElementById('wx-rain').textContent = fmt(f.rainfall_mm, 1, ' mm');
-    document.getElementById('wx-rad').textContent = fmt(f.solar_rad_mj_m2, 1, ' MJ/m\u00b2');
+    document.getElementById('wx-rad').textContent  = fmt(f.solar_rad_mj_m2, 1, ' MJ/m\u00b2');
     // weather source indicator
     const src = WX_SOURCES[f.weather_source] || WX_SOURCES.unknown;
-    const dot = document.getElementById('wx-source-dot');
-    const lbl = document.getElementById('wx-source-label');
-    dot.style.background = src.color;
-    lbl.textContent = src.label;
+    document.getElementById('wx-source-dot').style.background = src.color;
+    document.getElementById('wx-source-label').textContent    = src.label;
     // badges
     const driftClass = f.drift_level === 'high' ? 'badge-drift-high' : f.drift_level === 'low' ? 'badge-drift-low' : 'badge-drift-none';
     const driftIcon  = f.drift_level === 'high' ? '\u26a0\ufe0f' : f.drift_level === 'low' ? '\u25b3' : '\u2713';
@@ -714,20 +774,17 @@
         if (!entries.length) { body.textContent = 'No data.'; return; }
         const maxVal = Math.max(...entries.map(e => Math.abs(e[1])), 0.0001);
         body.innerHTML = entries.map(([feat, val]) => {
-          const pct = Math.round((Math.abs(val) / maxVal) * 100);
-          const displayName = feat.replace(/_/g, ' ');
-          const displayVal = Math.abs(val) > 1 ? Math.round(val).toLocaleString() : val.toFixed(3);
+          const pct  = Math.round((Math.abs(val) / maxVal) * 100);
+          const name = feat.replace(/_/g, ' ');
+          const disp = Math.abs(val) > 1 ? Math.round(val).toLocaleString('en-GB') : val.toFixed(3);
           return `<div class="feat-row">
-            <div class="feat-name" title="${displayName}">${displayName}</div>
+            <div class="feat-name" title="${name}">${name}</div>
             <div class="feat-bar-track"><div class="feat-bar-fill" style="width:0%" data-pct="${pct}"></div></div>
-            <div class="feat-val">${displayVal}</div>
+            <div class="feat-val">${disp}</div>
           </div>`;
         }).join('');
-        // animate bars after render
         setTimeout(() => {
-          body.querySelectorAll('.feat-bar-fill').forEach(el => {
-            el.style.width = el.dataset.pct + '%';
-          });
+          body.querySelectorAll('.feat-bar-fill').forEach(el => { el.style.width = el.dataset.pct + '%'; });
         }, 60);
         note.textContent = data.explanation_note || '';
       })
@@ -738,14 +795,14 @@
   function loadDrift(f) {
     const body = document.getElementById('psi-body');
     if (!f.psi_scores || !Object.keys(f.psi_scores).length) {
-      body.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);padding:8px 0">No PSI data yet &mdash; needs more observations.</div>';
+      body.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);padding:8px 0">No PSI data yet \u2014 needs more observations.</div>';
       return;
     }
     const entries = Object.entries(f.psi_scores).sort((a, b) => b[1] - a[1]);
-    const maxPsi = Math.max(...entries.map(e => e[1]), 0.01);
+    const maxPsi  = Math.max(...entries.map(e => e[1]), 0.01);
     body.innerHTML = entries.map(([feat, psi]) => {
-      const pct = Math.round((psi / Math.max(maxPsi, 0.6)) * 100);
-      const cls = psi > 0.5 ? 'psi-red' : psi > 0.25 ? 'psi-yellow' : 'psi-green';
+      const pct   = Math.round((psi / Math.max(maxPsi, 0.6)) * 100);
+      const cls   = psi > 0.5 ? 'psi-red' : psi > 0.25 ? 'psi-yellow' : 'psi-green';
       const scoreColor = psi > 0.5 ? 'var(--red)' : psi > 0.25 ? 'var(--yellow)' : 'var(--green)';
       return `<div class="psi-row">
         <div class="psi-label">
@@ -763,16 +820,15 @@
   /* ── open / close panel ── */
   function openPanel(f) {
     currentField = f;
-    document.getElementById('p-id').textContent = f.field_id;
+    document.getElementById('p-id').textContent   = f.field_id;
     document.getElementById('p-name').textContent = f.name || f.field_id;
     document.getElementById('p-crop').textContent = (CROP_LABELS[f.crop_type] || f.crop_type).replace(/_/g, ' ');
     document.getElementById('p-region').textContent = f.region || '\u2014';
-    document.getElementById('p-area').textContent = f.area_ha + ' ha';
-    document.getElementById('p-coords').textContent = f.lat.toFixed(3) + ', ' + f.lon.toFixed(3);
+    document.getElementById('p-area').textContent   = f.area_ha + ' ha';
+    document.getElementById('p-coords').textContent = fmtCoord(f.lat, f.lon);
     const soil = (f.soil_type || '').replace(/_/g, ' ');
     document.getElementById('p-soil').innerHTML = soil ? `<span class="soil-badge">${soil}</span>` : '\u2014';
     renderOverviewData(f);
-    // reset to overview tab
     document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     document.querySelector('[data-tab="overview"]').classList.add('active');
